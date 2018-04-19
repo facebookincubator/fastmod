@@ -248,13 +248,16 @@ impl Fastmod {
                         let (start_line, _) = index_to_row_col(&contents, mat.start() + offset);
                         let (end_line, _) = index_to_row_col(&contents, mat.end() + offset - 1);
                         offset = offset + mat.start() + 1;
-                        self.ask_about_patch(
+                        let changed = self.ask_about_patch(
                             path,
                             &contents,
                             start_line + 1,
                             end_line + 1,
                             &new_contents,
                         )?;
+                        if !changed {
+                            offset = offset + (mat.end() - mat.start());
+                        }
                     }
                 }
             }
@@ -271,7 +274,7 @@ impl Fastmod {
         start_line: usize,
         end_line: usize,
         new: &str,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.term.clear();
         if start_line == end_line {
             println!("{}:{}", path.to_string_lossy(), start_line);
@@ -293,21 +296,26 @@ impl Fastmod {
             self.yes_to_all = true;
             user_input = 'y';
         }
-        match user_input {
-            'y' => self.save(path, new)?,
+        let res = match user_input {
+            'y' => {
+                self.save(path, new)?;
+                true
+            }
             'E' => {
                 self.save(path, new)?;
                 run_editor(path, start_line)?;
+                true
             }
             'e' => {
                 self.record_change(path.to_owned());
                 run_editor(path, start_line)?;
+                true
             }
             'q' => exit(0),
-            'n' => {}
+            'n' => false,
             _ => unreachable!(),
-        }
-        Ok(())
+        };
+        Ok(res)
     }
 
     fn diffs_to_print<'a>(&self, orig: &'a str, edit: &'a str) -> Vec<DiffResult<&'a str>> {
