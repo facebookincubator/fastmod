@@ -2,7 +2,7 @@
 name = "fastmod"
 version = "0.1.0"
 authors = ["Scott Wolchok <swolchok@fb.com>"]
-description = "Find/replace tool for programmers, very much like codemod."
+description = "Fast partial replacement for codemod (find/replace tool for programmers)"
 homepage = "https://github.com/facebookincubator/fastmod"
 repository = "https://github.com/facebookincubator/fastmod"
 readme = "README.md"
@@ -19,7 +19,7 @@ num_cpus = "1.8.0"
 regex = "0.2.10"
 rprompt = "1.0.3"
 scopeguard = "0.3.3"
-term = "*"
+term = "0.5.1"
 term_size = "0.3"
 
 [dev-dependencies]
