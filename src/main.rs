@@ -266,24 +266,27 @@ impl Fastmod {
         Ok(())
     }
 
-    fn ask_about_patch(
+    fn ask_about_patch<'a>(
         &mut self,
         path: &Path,
-        old: &str,
+        old: &'a str,
         start_line: usize,
         end_line: usize,
-        new: &str,
+        new: &'a str,
     ) -> Result<()> {
         self.term.clear();
+
+        let diffs = self.diffs_to_print(old, new);
+        if diffs.is_empty() {
+            return Ok(());
+        }
+
         if start_line == end_line {
             println!("{}:{}", path.to_string_lossy(), start_line);
         } else {
             println!("{}:{}-{}", path.to_string_lossy(), start_line, end_line);
         }
-        if !self.print_diff(old, new) {
-            println!("No changes.");
-            return Ok(());
-        }
+        self.print_diff(&diffs);
         let mut user_input = if self.yes_to_all {
             'y'
         } else {
@@ -362,27 +365,22 @@ impl Fastmod {
         diffs
     }
 
-    fn print_diff(&mut self, orig: &str, edit: &str) -> bool {
-        let mut printed_diffs = false;
-
-        for diff in self.diffs_to_print(orig, edit) {
-            printed_diffs = true;
+    fn print_diff<'a>(&mut self, diffs: &Vec<DiffResult<&'a str>>) {
+        for diff in diffs {
             match diff {
-                DiffResult::Left(l) => {
+                &DiffResult::Left(l) => {
                     self.term.fg(term::color::RED);
                     println!("- {}", l);
                     self.term.reset();
                 }
-                DiffResult::Both(l, _) => println!("  {}", l),
-                DiffResult::Right(r) => {
+                &DiffResult::Both(l, _) => println!("  {}", l),
+                &DiffResult::Right(r) => {
                     self.term.fg(term::color::GREEN);
                     println!("+ {}", r);
                     self.term.reset();
                 }
             }
         }
-
-        printed_diffs
     }
 
     fn run_interactive(
