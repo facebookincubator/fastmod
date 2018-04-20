@@ -280,7 +280,10 @@ impl Fastmod {
         } else {
             println!("{}:{}-{}", path.to_string_lossy(), start_line, end_line);
         }
-        self.print_diff(old, new);
+        if !self.print_diff(old, new) {
+            println!("No changes.");
+            return Ok(());
+        }
         let mut user_input = if self.yes_to_all {
             'y'
         } else {
@@ -359,8 +362,11 @@ impl Fastmod {
         diffs
     }
 
-    fn print_diff(&mut self, orig: &str, edit: &str) {
+    fn print_diff(&mut self, orig: &str, edit: &str) -> bool {
+        let mut printed_diffs = false;
+
         for diff in self.diffs_to_print(orig, edit) {
+            printed_diffs = true;
             match diff {
                 DiffResult::Left(l) => {
                     self.term.fg(term::color::RED);
@@ -375,6 +381,8 @@ impl Fastmod {
                 }
             }
         }
+
+        printed_diffs
     }
 
     fn run_interactive(
