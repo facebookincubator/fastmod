@@ -334,6 +334,9 @@ impl Fastmod {
         let num_prefix_lines = diffs.iter().take_while(is_same).count();
         let num_suffix_lines = diffs.iter().rev().take_while(is_same).count();
 
+        // If the prefix is the length of the diff then the file matched <regex>
+        // but applying <subst> didn't result in any changes, there are no diffs
+        // to print so we return an empty Vec.
         if diffs.len() == num_prefix_lines {
             return vec![];
         }
