@@ -247,7 +247,9 @@ impl Fastmod {
                         new_contents.push_str(&new_trailing_contents);
                         let (start_line, _) = index_to_row_col(&contents, mat.start() + offset);
                         let (end_line, _) = index_to_row_col(&contents, mat.end() + offset - 1);
-                        offset = offset + mat.start() + 1;
+                        // If the substitution is zero length, need to
+                        // restart from the *same* position!
+                        offset = offset + mat.start() + min(1, subst.len());
                         self.ask_about_patch(
                             path,
                             &contents,
@@ -783,5 +785,23 @@ mod tests {
             .stdout()
             .doesnt_contain("file5.c")
             .unwrap();
+    }
+
+    #[test]
+    fn test_zero_length_replacement() {
+        let dir = TempDir::new("fastmodtest").unwrap();
+        let file_path = dir.path().join("foo.txt");
+        {
+            let mut f1 = File::create(file_path.clone()).unwrap();
+            f1.write_all(b"foofoo").unwrap();
+            f1.sync_all().unwrap();
+        }
+        let regex = RegexBuilder::new("foo").multi_line(true).build().unwrap();
+        let mut fm = Fastmod::new(true, false);
+        fm.present_and_apply_patches(&regex, "", &file_path, "foofoo".into()).unwrap();
+        let mut f1 = File::open(file_path).unwrap();
+        let mut contents = String::new();
+        f1.read_to_string(&mut contents).unwrap();
+        assert_eq!(contents, "");
     }
 }
