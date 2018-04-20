@@ -365,7 +365,7 @@ impl Fastmod {
         diffs
     }
 
-    fn print_diff<'a>(&mut self, diffs: &Vec<DiffResult<&'a str>>) {
+    fn print_diff<'a>(&mut self, diffs: &[DiffResult<&'a str>]) {
         for diff in diffs {
             match diff {
                 &DiffResult::Left(l) => {
