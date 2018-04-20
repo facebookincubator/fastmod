@@ -327,6 +327,11 @@ impl Fastmod {
 
         let num_prefix_lines = diffs.iter().take_while(is_same).count();
         let num_suffix_lines = diffs.iter().rev().take_while(is_same).count();
+
+        if diffs.len() == num_prefix_lines {
+            return vec![];
+        }
+
         let size_of_diff = diffs.len() - num_prefix_lines - num_suffix_lines;
         let size_of_context = lines_to_print.saturating_sub(size_of_diff);
         let size_of_up_context = size_of_context / 2;
@@ -753,6 +758,13 @@ mod tests {
     }
 
     #[test]
+    fn test_diff_no_changes() {
+        let fm = Fastmod::new(false, false);
+        let diffs = fm.diffs_to_print("foo", "foo");
+        assert_eq!(diffs, vec![]);
+    }
+
+    #[test]
     fn test_print_changed_files() {
         let dir = TempDir::new("fastmodtest").unwrap();
         for file_num in 1..6 {
@@ -798,7 +810,8 @@ mod tests {
         }
         let regex = RegexBuilder::new("foo").multi_line(true).build().unwrap();
         let mut fm = Fastmod::new(true, false);
-        fm.present_and_apply_patches(&regex, "", &file_path, "foofoo".into()).unwrap();
+        fm.present_and_apply_patches(&regex, "", &file_path, "foofoo".into())
+            .unwrap();
         let mut f1 = File::open(file_path).unwrap();
         let mut contents = String::new();
         f1.read_to_string(&mut contents).unwrap();
