@@ -266,21 +266,27 @@ impl Fastmod {
         Ok(())
     }
 
-    fn ask_about_patch(
+    fn ask_about_patch<'a>(
         &mut self,
         path: &Path,
-        old: &str,
+        old: &'a str,
         start_line: usize,
         end_line: usize,
-        new: &str,
+        new: &'a str,
     ) -> Result<()> {
         self.term.clear();
+
+        let diffs = self.diffs_to_print(old, new);
+        if diffs.is_empty() {
+            return Ok(());
+        }
+
         if start_line == end_line {
             println!("{}:{}", path.to_string_lossy(), start_line);
         } else {
             println!("{}:{}-{}", path.to_string_lossy(), start_line, end_line);
         }
-        self.print_diff(old, new);
+        self.print_diff(&diffs);
         let mut user_input = if self.yes_to_all {
             'y'
         } else {
@@ -327,6 +333,14 @@ impl Fastmod {
 
         let num_prefix_lines = diffs.iter().take_while(is_same).count();
         let num_suffix_lines = diffs.iter().rev().take_while(is_same).count();
+
+        // If the prefix is the length of the diff then the file matched <regex>
+        // but applying <subst> didn't result in any changes, there are no diffs
+        // to print so we return an empty Vec.
+        if diffs.len() == num_prefix_lines {
+            return vec![];
+        }
+
         let size_of_diff = diffs.len() - num_prefix_lines - num_suffix_lines;
         let size_of_context = lines_to_print.saturating_sub(size_of_diff);
         let size_of_up_context = size_of_context / 2;
@@ -354,16 +368,16 @@ impl Fastmod {
         diffs
     }
 
-    fn print_diff(&mut self, orig: &str, edit: &str) {
-        for diff in self.diffs_to_print(orig, edit) {
+    fn print_diff<'a>(&mut self, diffs: &[DiffResult<&'a str>]) {
+        for diff in diffs {
             match diff {
-                DiffResult::Left(l) => {
+                &DiffResult::Left(l) => {
                     self.term.fg(term::color::RED);
                     println!("- {}", l);
                     self.term.reset();
                 }
-                DiffResult::Both(l, _) => println!("  {}", l),
-                DiffResult::Right(r) => {
+                &DiffResult::Both(l, _) => println!("  {}", l),
+                &DiffResult::Right(r) => {
                     self.term.fg(term::color::GREEN);
                     println!("+ {}", r);
                     self.term.reset();
@@ -753,6 +767,13 @@ mod tests {
     }
 
     #[test]
+    fn test_diff_no_changes() {
+        let fm = Fastmod::new(false, false);
+        let diffs = fm.diffs_to_print("foo", "foo");
+        assert_eq!(diffs, vec![]);
+    }
+
+    #[test]
     fn test_print_changed_files() {
         let dir = TempDir::new("fastmodtest").unwrap();
         for file_num in 1..6 {
@@ -798,7 +819,8 @@ mod tests {
         }
         let regex = RegexBuilder::new("foo").multi_line(true).build().unwrap();
         let mut fm = Fastmod::new(true, false);
-        fm.present_and_apply_patches(&regex, "", &file_path, "foofoo".into()).unwrap();
+        fm.present_and_apply_patches(&regex, "", &file_path, "foofoo".into())
+            .unwrap();
         let mut f1 = File::open(file_path).unwrap();
         let mut contents = String::new();
         f1.read_to_string(&mut contents).unwrap();
