@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 use std::io;
-use term::{self, StdoutTerminal};
 use term::color::Color;
 use term::terminfo::TermInfo;
+use term::{self, StdoutTerminal};
 
 pub struct Terminal {
     ti: Option<TermInfo>,

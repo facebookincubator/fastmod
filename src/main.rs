@@ -33,8 +33,8 @@ extern crate term_size;
 use clap::{App, Arg};
 use diff::Result as DiffResult;
 use failure::{Error, ResultExt};
-use ignore::{WalkBuilder, WalkState};
 use ignore::overrides::OverrideBuilder;
+use ignore::{WalkBuilder, WalkState};
 use regex::{Regex, RegexBuilder};
 use std::borrow::Cow;
 use std::cmp::{max, min};
@@ -54,6 +54,35 @@ use rprompt::prompt_reply_stdout;
 use terminal::Terminal;
 
 type Result<T> = ::std::result::Result<T, Error>;
+
+#[derive(Clone)]
+enum FileSet {
+    Extensions(Vec<String>),
+    Glob {
+        matches: Vec<String>,
+        case_insensitive: bool,
+    },
+}
+
+fn get_file_set(matches: &clap::ArgMatches) -> Option<FileSet> {
+    if let Some(files) = matches.values_of_lossy("extensions") {
+        return Some(FileSet::Extensions(files));
+    }
+    if let Some(files) = matches.values_of_lossy("glob") {
+        return Some(FileSet::Glob {
+            matches: files,
+            case_insensitive: false,
+        });
+    }
+    if let Some(files) = matches.values_of_lossy("iglob") {
+        return Some(FileSet::Glob {
+            matches: files,
+            case_insensitive: true,
+        });
+    }
+
+    None
+}
 
 fn notify_fast_mode() {
     writeln!(
@@ -102,25 +131,47 @@ fn prompt(prompt_text: &str, letters: &str, default: Option<char>) -> Result<cha
     }
 }
 
-fn walk_builder_with_extensions(
-    dirs: Vec<&str>,
-    extensions: Option<Vec<&str>>,
-) -> Result<WalkBuilder> {
+fn walk_builder_with_file_set(dirs: Vec<&str>, file_set: Option<FileSet>) -> Result<WalkBuilder> {
     ensure!(!dirs.is_empty(), "must provide at least one path to walk!");
     let mut builder = WalkBuilder::new(dirs[0]);
     for dir in &dirs[1..] {
         builder.add(dir);
     }
-    if let Some(extensions) = extensions {
-        let mut override_builder = OverrideBuilder::new(".");
-        for ext in extensions {
-            override_builder
-                .add(&format!("*.{}", ext))
-                .context("Unable to register extension with directory walker")?;
+    if let Some(file_set) = file_set {
+        use FileSet::*;
+        match file_set {
+            Extensions(e) => {
+                let mut override_builder = OverrideBuilder::new(".");
+                for ext in e {
+                    override_builder
+                        .add(&format!("*.{}", ext))
+                        .context("Unable to register extension with directory walker")?;
+                }
+                builder.overrides(override_builder
+                    .build()
+                    .context("Unable to register extensions with directory walker")?);
+            }
+            Glob {
+                matches,
+                case_insensitive,
+            } => {
+                let mut override_builder = OverrideBuilder::new(".");
+                // Case sensitivity needs to be added before the patterns are.
+                if case_insensitive {
+                    override_builder
+                        .case_insensitive(true)
+                        .context("Unable to toggle case sensitivity")?;
+                }
+                for file in matches {
+                    override_builder
+                        .add(&file)
+                        .context("Unable to register glob with directory walker")?;
+                }
+                builder.overrides(override_builder
+                    .build()
+                    .context("Unable to register glob with directory walker")?);
+            }
         }
-        builder.overrides(override_builder
-            .build()
-            .context("Unable to register extensions with directory walker")?);
     }
     Ok(builder)
 }
@@ -391,13 +442,13 @@ impl Fastmod {
         regex: &Regex,
         subst: &str,
         dirs: Vec<&str>,
-        extensions: Option<Vec<&str>>,
+        file_set: Option<FileSet>,
     ) -> Result<()> {
         // Doing everything in serial seems fine for interactive
         // mode. We find the next file to show the user quickly
         // enough, and the user can't read patches concurrently
         // anyway.
-        let walk = walk_builder_with_extensions(dirs.clone(), extensions.clone())?.build();
+        let walk = walk_builder_with_file_set(dirs.clone(), file_set.clone())?.build();
         let mut errors = scopeguard::guard(Vec::new(), |errors| {
             // We print all errors at the end because our constant screen
             // clearing makes them difficult to see during the normal
@@ -450,7 +501,7 @@ impl Fastmod {
                             regex,
                             subst,
                             dirs,
-                            extensions,
+                            file_set,
                             self.changed_files.clone(),
                             Some(visited),
                         );
@@ -466,14 +517,14 @@ impl Fastmod {
         regex: &Regex,
         subst: &str,
         dirs: Vec<&str>,
-        extensions: Option<Vec<&str>>,
+        file_set: Option<FileSet>,
         print_changed_files: bool,
     ) -> Result<()> {
         Fastmod::run_fast_impl(
             regex,
             subst,
             dirs,
-            extensions,
+            file_set,
             if print_changed_files {
                 Some(Vec::new())
             } else {
@@ -487,11 +538,11 @@ impl Fastmod {
         regex: &Regex,
         subst: &str,
         dirs: Vec<&str>,
-        extensions: Option<Vec<&str>>,
+        file_set: Option<FileSet>,
         changed_files: Option<Vec<PathBuf>>,
         visited: Option<HashSet<PathBuf>>,
     ) -> Result<()> {
-        let walk = walk_builder_with_extensions(dirs, extensions)?
+        let walk = walk_builder_with_file_set(dirs, file_set)?
             // TODO: make number of threads configurable.
             .threads(min(12, num_cpus::get()))
             .build_parallel();
@@ -630,8 +681,25 @@ compatibility with the original codemod.",
                 .value_name("EXTENSION")
                 .multiple(true)
                 .require_delimiter(true)
-            // TODO: support Unix pattern-matching of extensions?
+                .conflicts_with_all(&["glob", "iglob"])
+                // TODO: support Unix pattern-matching of extensions?
                 .help("A comma-delimited list of file extensions to process."),
+        )
+        .arg(
+            Arg::with_name("glob")
+            .short("g")
+            .long("glob")
+            .value_name("GLOB")
+            .multiple(true)
+            .conflicts_with("iglob")
+            .help("A space-delimited list of globs to process.")
+        )
+        .arg(
+            Arg::with_name("iglob")
+            .long("iglob")
+            .value_name("IGLOB")
+            .multiple(true)
+            .help("A space-delimited list of case-insensitive globs to process.")
         )
         .arg(
             Arg::with_name("accept_all")
@@ -676,32 +744,22 @@ compatibility with the original codemod.",
         dirs
     };
     let ignore_case = matches.is_present("ignore_case");
-    let filter_extensions = matches.is_present("extensions");
-    let extensions: Option<Vec<&str>> = if filter_extensions {
-        Some(matches.values_of("extensions").unwrap().collect())
-    } else {
-        None
-    };
+    let file_set = get_file_set(&matches);
     let accept_all = matches.is_present("accept_all");
     let print_changed_files = matches.is_present("print_changed_files");
     let regex_str = matches.value_of("match").expect("match is required!");
     let regex = RegexBuilder::new(regex_str)
         .case_insensitive(ignore_case)
-        .multi_line(true) // match codemod behavior for ^ and $
+        .multi_line(true) // match codemod behavior for ^ and $.
         .dot_matches_new_line(multiline)
         .build().with_context(|_| format!("Unable to make regex from {}", regex_str))?;
     let subst = matches.value_of("subst").expect("subst is required!");
 
     if accept_all {
         notify_fast_mode();
-        Fastmod::run_fast(&regex, subst, dirs, extensions, print_changed_files)
+        Fastmod::run_fast(&regex, subst, dirs, file_set, print_changed_files)
     } else {
-        Fastmod::new(accept_all, print_changed_files).run_interactive(
-            &regex,
-            subst,
-            dirs,
-            extensions,
-        )
+        Fastmod::new(accept_all, print_changed_files).run_interactive(&regex, subst, dirs, file_set)
     }
 }
 
@@ -748,6 +806,46 @@ mod tests {
         let mut contents = String::new();
         f1.read_to_string(&mut contents).unwrap();
         assert_eq!(contents, "bar\nbar blah bar");
+    }
+
+    #[test]
+    fn test_glob_matches() {
+        fn create_and_write_file(path: &Path, contents: &str) {
+            let mut f = File::create(path).unwrap();
+            f.write_all(contents.as_bytes()).unwrap();
+            f.sync_all().unwrap();
+        }
+
+        let dir = TempDir::new("fastmodtest").unwrap();
+        let lower = dir.path().join("f1.txt");
+        let upper = dir.path().join("f2.TXT");
+        let skipped = dir.path().join("skip.rs");
+
+        create_and_write_file(&lower, "some awesome text");
+        create_and_write_file(&upper, "some more awesome text");
+        create_and_write_file(&skipped, "i should be skipped but i am still awesome");
+
+        Assert::main_binary()
+            .with_args(&[
+                "awesome",
+                "great",
+                "--accept-all",
+                "--iglob",
+                "*.txt",
+                "--dir",
+                dir.path().to_str().unwrap(),
+            ])
+            .unwrap();
+
+        let lower_translated = slurp(&lower).unwrap();
+        let upper_translated = slurp(&upper).unwrap();
+        let skipped_translated = slurp(&skipped).unwrap();
+        assert_eq!(lower_translated, "some great text");
+        assert_eq!(upper_translated, "some more great text");
+        assert_eq!(
+            skipped_translated,
+            "i should be skipped but i am still awesome"
+        );
     }
 
     #[test]
