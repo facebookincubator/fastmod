@@ -631,9 +631,8 @@ $EDITOR of choice.
 NOTE: Whereas codemod uses Python regexes, fastmod uses the Rust regex
 crate, which supports a slightly different regex syntax and does not support
 look around or backreferences. In particular, use ${1} instead of \\1 to get
-the contents of the first capture group. See
-https://doc.rust-lang.org/regex/regex/index.html#syntax
-for details.
+the contents of the first capture group. See https://docs.rs/regex#syntax for
+details.
 
 A consequence of this syntax is that the use of single quotes instead
 of double quotes around the replacment text is important, because the
