@@ -1,6 +1,6 @@
 [package]
 name = "fastmod"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Scott Wolchok <swolchok@fb.com>"]
 description = "Fast partial replacement for codemod (find/replace tool for programmers)"
 homepage = "https://github.com/facebookincubator/fastmod"
