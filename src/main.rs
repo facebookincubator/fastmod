@@ -16,6 +16,7 @@
 
 #[cfg(test)]
 extern crate assert_cli;
+#[macro_use]
 extern crate clap;
 extern crate diff;
 #[macro_use]
@@ -612,6 +613,7 @@ impl Fastmod {
 fn fastmod() -> Result<()> {
     let matches = App::new("fastmod")
         .about("fastmod is a fast partial replacement for codemod.")
+        .version(crate_version!())
         .long_about(
             "fastmod is a tool to assist you with large-scale codebase refactors
 that can be partially automated but still require human oversight and occasional
