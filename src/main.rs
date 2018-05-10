@@ -103,12 +103,25 @@ fn slurp(path: &Path) -> Result<String> {
 fn run_editor(path: &Path, start_line: usize) -> Result<()> {
     let editor = env::var("EDITOR").unwrap_or(String::from("vim"));
     let args: Vec<&str> = editor.split(" ").collect();
-    Command::new(args[0])
-        .args(&args[1..])
-        .arg(format!("+{}", start_line))
-        .arg(path)
-        .spawn()
-        .with_context(|_| format!("Unable to launch editor {} on path {:?}", editor, path))?
+    let mut editor_cmd = {
+        let mut cmd = Command::new(args[0])
+            .args(&args[1..])
+            .arg(format!("+{}", start_line))
+            .arg(path)
+            .spawn()
+            .with_context(|_| format!("Unable to launch editor {} on path {:?}", editor, path));
+        if cfg!(target_os = "windows") && cmd.is_err() {
+            // Windows-only fallback to notepad.exe.
+            cmd = Command::new("notepad.exe")
+                .arg(path)
+                .spawn()
+                .with_context(|_| {
+                    format!("Unable to launch editor notepad.exe on path {:?}", path)
+                });
+        }
+        cmd?
+    };
+    editor_cmd
         .wait()
         .context("Error waiting for editor to exit")?;
     Ok(())
