@@ -57,7 +57,20 @@ own parallel directory traversal internally, so doing `find ... |
 xargs fastmod ...` may be much slower than using `fastmod` by itself.
 
 ## Requirements
-`fastmod` is supported on macOS and Linux.
+
+`fastmod` is primarily supported on macOS and Linux.
+
+`fastmod` has also been reported to work reasonably well on
+Windows. The major portability concerns are 1) the use of `$EDITOR`
+with a fallback and 2) the console UI, which is descended from
+`codemod`'s ncurses-based text coloring & screen clearing
+code. Windows-specific issues and PRs will be considered as long as
+they aren't too invasive. For example, if something doesn't work on
+Windows because a Linux/Mac-specific API was used instead of
+equivalent POSIX or Rust standard library calls, we would be happy to
+fix that. On the other hand, we would like to avoid taking a direct
+`winapi` dependency or substantially increasing the size of our
+dependency graph for Windows-only enhancements.
 
 ## Building `fastmod`
 
