@@ -312,16 +312,21 @@ impl Fastmod {
                         new_contents.push_str(&new_trailing_contents);
                         let (start_line, _) = index_to_row_col(&contents, mat.start() + offset);
                         let (end_line, _) = index_to_row_col(&contents, mat.end() + offset - 1);
-                        // If the substitution is zero length, need to
-                        // restart from the *same* position!
-                        offset = offset + mat.start() + min(1, subst.len());
-                        self.ask_about_patch(
+                        let accepted = self.ask_about_patch(
                             path,
                             &contents,
                             start_line + 1,
                             end_line + 1,
                             &new_contents,
                         )?;
+                        if accepted {
+                            // If the substitution is zero length, need to
+                            // restart from the *same* position!
+                            offset = offset + mat.start() + min(1, subst.len());
+                        } else {
+                            // Need to advance even if the substitution is zero length.
+                            offset = offset + mat.start() + 1;
+                        }
                     }
                 }
             }
@@ -331,6 +336,7 @@ impl Fastmod {
         Ok(())
     }
 
+    /// Returns true if the patch was accepted, false otherwise.
     fn ask_about_patch<'a>(
         &mut self,
         path: &Path,
@@ -338,12 +344,12 @@ impl Fastmod {
         start_line: usize,
         end_line: usize,
         new: &'a str,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.term.clear();
 
         let diffs = self.diffs_to_print(old, new);
         if diffs.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
 
         if start_line == end_line {
@@ -367,20 +373,26 @@ impl Fastmod {
             user_input = 'y';
         }
         match user_input {
-            'y' => self.save(path, new)?,
+            'y' => {
+                self.save(path, new)?;
+                return Ok(true);
+            }
             'E' => {
                 self.save(path, new)?;
                 run_editor(path, start_line)?;
+                return Ok(true);
             }
             'e' => {
                 self.record_change(path.to_owned());
                 run_editor(path, start_line)?;
+                return Ok(true);
             }
             'q' => exit(0),
-            'n' => {}
+            'n' => {
+                return Ok(false);
+            }
             _ => unreachable!(),
         }
-        Ok(())
     }
 
     fn diffs_to_print<'a>(&self, orig: &'a str, edit: &'a str) -> Vec<DiffResult<&'a str>> {
