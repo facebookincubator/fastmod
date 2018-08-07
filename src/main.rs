@@ -738,6 +738,12 @@ compatibility with the original codemod.",
                 .help("Print the paths of changed files. (Recommended to be combined with --accept-all.)"),
         )
         .arg(
+            Arg::with_name("fixed_strings")
+                .long("fixed-strings")
+                .short("F")
+                .help("Treat REGEX as a literal string. Avoids the need to escape regex metacharacters (compare to ripgrep's option of the same name).")
+        )
+        .arg(
             Arg::with_name("match")
                 .value_name("REGEX")
                 .help("Regular expression to match.")
@@ -774,7 +780,12 @@ compatibility with the original codemod.",
     let accept_all = matches.is_present("accept_all");
     let print_changed_files = matches.is_present("print_changed_files");
     let regex_str = matches.value_of("match").expect("match is required!");
-    let regex = RegexBuilder::new(regex_str)
+    let maybe_escaped_regex = if matches.is_present("fixed_strings") {
+        regex::escape(regex_str)
+    } else {
+        regex_str.to_string()
+    };
+    let regex = RegexBuilder::new(&maybe_escaped_regex)
         .case_insensitive(ignore_case)
         .multi_line(true) // match codemod behavior for ^ and $.
         .dot_matches_new_line(multiline)
@@ -810,15 +821,17 @@ mod tests {
         assert_eq!(index_to_row_col("abc\ndef\nghi", 8), (2, 0));
     }
 
+    fn create_and_write_file(path: &Path, contents: &str) {
+        let mut f = File::create(path).unwrap();
+        f.write_all(contents.as_bytes()).unwrap();
+        f.sync_all().unwrap();
+    }
+
     #[test]
     fn test_simple_replace_all() {
         let dir = TempDir::new("fastmodtest").unwrap();
         let file_path = dir.path().join("file1.c");
-        {
-            let mut f1 = File::create(file_path.clone()).unwrap();
-            f1.write_all(b"foo\nfoo blah foo").unwrap();
-            f1.sync_all().unwrap();
-        }
+        create_and_write_file(&file_path, "foo\nfoo blah foo");
         Assert::main_binary()
             .with_args(&[
                 "foo",
@@ -836,12 +849,6 @@ mod tests {
 
     #[test]
     fn test_glob_matches() {
-        fn create_and_write_file(path: &Path, contents: &str) {
-            let mut f = File::create(path).unwrap();
-            f.write_all(contents.as_bytes()).unwrap();
-            f.sync_all().unwrap();
-        }
-
         let dir = TempDir::new("fastmodtest").unwrap();
         let lower = dir.path().join("f1.txt");
         let upper = dir.path().join("f2.TXT");
@@ -872,6 +879,27 @@ mod tests {
             skipped_translated,
             "i should be skipped but i am still awesome"
         );
+    }
+
+    #[test]
+    fn test_fixed_strings() {
+        let dir = TempDir::new("fastmodtest").unwrap();
+        let file_path = dir.path().join("file1.txt");
+        create_and_write_file(&file_path, "foo+bar\nfoooobar");
+        Assert::main_binary()
+            .with_args(&[
+                "foo+bar",
+                "baz",
+                "--accept-all",
+                "--dir",
+                dir.path().to_str().unwrap(),
+                "--fixed-strings",
+            ])
+            .unwrap();
+        let mut f1 = File::open(file_path).unwrap();
+        let mut contents = String::new();
+        f1.read_to_string(&mut contents).unwrap();
+        assert_eq!(contents, "baz\nfoooobar");
     }
 
     #[test]
