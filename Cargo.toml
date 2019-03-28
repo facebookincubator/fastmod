@@ -3,6 +3,7 @@ name = "fastmod"
 version = "0.2.2"
 authors = ["Scott Wolchok <swolchok@fb.com>"]
 description = "Fast partial replacement for codemod (find/replace tool for programmers)"
+edition = "2018"
 homepage = "https://github.com/facebookincubator/fastmod"
 repository = "https://github.com/facebookincubator/fastmod"
 readme = "README.md"

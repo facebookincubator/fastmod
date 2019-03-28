@@ -13,26 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#[cfg(test)]
-extern crate assert_cli;
-#[macro_use]
-extern crate clap;
-extern crate diff;
-#[macro_use]
-extern crate failure;
-extern crate ignore;
-extern crate num_cpus;
-extern crate regex;
-extern crate rprompt;
-extern crate scopeguard;
-#[cfg(test)]
-extern crate tempdir;
-extern crate term;
-extern crate term_size;
-
-use clap::{App, Arg};
+use clap::{crate_version, App, Arg};
 use diff::Result as DiffResult;
-use failure::{Error, ResultExt};
+use failure::{ensure, Error, ResultExt};
 use ignore::overrides::OverrideBuilder;
 use ignore::{WalkBuilder, WalkState};
 use regex::{Regex, RegexBuilder};
