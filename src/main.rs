@@ -50,8 +50,8 @@ use std::sync::{Arc, Mutex};
 
 mod terminal;
 
+use crate::terminal::Terminal;
 use rprompt::prompt_reply_stdout;
-use terminal::Terminal;
 
 type Result<T> = ::std::result::Result<T, Error>;
 
@@ -152,7 +152,7 @@ fn walk_builder_with_file_set(dirs: Vec<&str>, file_set: Option<FileSet>) -> Res
         builder.add(dir);
     }
     if let Some(file_set) = file_set {
-        use FileSet::*;
+        use crate::FileSet::*;
         match file_set {
             Extensions(e) => {
                 let mut override_builder = OverrideBuilder::new(".");
