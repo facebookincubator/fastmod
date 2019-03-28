@@ -100,8 +100,8 @@ fn slurp(path: &Path) -> Result<String> {
 }
 
 fn run_editor(path: &Path, start_line: usize) -> Result<()> {
-    let editor = env::var("EDITOR").unwrap_or(String::from("vim"));
-    let args: Vec<&str> = editor.split(" ").collect();
+    let editor = env::var("EDITOR").unwrap_or_else(|_| String::from("vim"));
+    let args: Vec<&str> = editor.split(' ').collect();
     let mut editor_cmd = {
         let mut cmd = Command::new(args[0])
             .args(&args[1..])
@@ -128,7 +128,7 @@ fn run_editor(path: &Path, start_line: usize) -> Result<()> {
 
 fn looks_like_code(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    !s.ends_with("~") && !s.ends_with("tags") && !s.ends_with("TAGS")
+    !s.ends_with('~') && !s.ends_with("tags") && !s.ends_with("TAGS")
 }
 
 fn prompt(prompt_text: &str, letters: &str, default: Option<char>) -> Result<char> {
@@ -374,21 +374,21 @@ impl Fastmod {
         match user_input {
             'y' => {
                 self.save(path, new)?;
-                return Ok(true);
+                Ok(true)
             }
             'E' => {
                 self.save(path, new)?;
                 run_editor(path, start_line)?;
-                return Ok(true);
+                Ok(true)
             }
             'e' => {
                 self.record_change(path.to_owned());
                 run_editor(path, start_line)?;
-                return Ok(true);
+                Ok(true)
             }
             'q' => exit(0),
             'n' => {
-                return Ok(false);
+                Ok(false)
             }
             _ => unreachable!(),
         }
@@ -396,9 +396,9 @@ impl Fastmod {
 
     fn diffs_to_print<'a>(&self, orig: &'a str, edit: &'a str) -> Vec<DiffResult<&'a str>> {
         let mut diffs = diff::lines(orig, edit);
-        fn is_same(x: &&DiffResult<&str>) -> bool {
+        fn is_same(x: &DiffResult<&str>) -> bool {
             match x {
-                &&DiffResult::Both(..) => true,
+                DiffResult::Both(..) => true,
                 _ => false,
             }
         }
@@ -407,8 +407,8 @@ impl Fastmod {
             None => 25,
         } - 20;
 
-        let num_prefix_lines = diffs.iter().take_while(is_same).count();
-        let num_suffix_lines = diffs.iter().rev().take_while(is_same).count();
+        let num_prefix_lines = diffs.iter().take_while(|diff| is_same(diff)).count();
+        let num_suffix_lines = diffs.iter().rev().take_while(|diff| is_same(diff)).count();
 
         // If the prefix is the length of the diff then the file matched <regex>
         // but applying <subst> didn't result in any changes, there are no diffs
@@ -447,13 +447,13 @@ impl Fastmod {
     fn print_diff<'a>(&mut self, diffs: &[DiffResult<&'a str>]) {
         for diff in diffs {
             match diff {
-                &DiffResult::Left(l) => {
+                DiffResult::Left(l) => {
                     self.term.fg(term::color::RED);
                     println!("- {}", l);
                     self.term.reset();
                 }
-                &DiffResult::Both(l, _) => println!("  {}", l),
-                &DiffResult::Right(r) => {
+                DiffResult::Both(l, _) => println!("  {}", l),
+                DiffResult::Right(r) => {
                     self.term.fg(term::color::GREEN);
                     println!("+ {}", r);
                     self.term.reset();
@@ -512,7 +512,7 @@ impl Fastmod {
                     errors.push(error);
                     continue;
                 }
-                let contents = slurped.ok().expect("checked for error above");
+                let contents = slurped.expect("checked for error above");
                 if regex.is_match(&contents) {
                     self.present_and_apply_patches(regex, subst, path, contents)?;
                     if self.yes_to_all {
@@ -609,7 +609,7 @@ impl Fastmod {
                             .expect("error writing to stderr");
                         return WalkState::Continue;
                     }
-                    let contents = slurped.ok().expect("checked for error above");
+                    let contents = slurped.expect("checked for error above");
                     let patching_result = fm.fast_patch(&regex, &subst, path, &contents);
                     match patching_result {
                         Ok(changed_file) => if should_record_changed_files && changed_file {
@@ -762,11 +762,11 @@ compatibility with the original codemod.",
     let dirs = {
         let mut dirs: Vec<_> = matches
             .values_of("dir")
-            .unwrap_or(::clap::Values::default())
+            .unwrap_or_default()
             .chain(
                 matches
                     .values_of("file-or-dir")
-                    .unwrap_or(::clap::Values::default()),
+                    .unwrap_or_default(),
             )
             .collect();
         if dirs.is_empty() {
