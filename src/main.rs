@@ -88,7 +88,8 @@ fn notify_fast_mode() {
     writeln!(
         ::std::io::stderr(),
         "Fast mode activated. Sit back, relax, and enjoy the brief flight."
-    ).expect("error writing to stderr");
+    )
+    .expect("error writing to stderr");
 }
 
 fn slurp(path: &Path) -> Result<String> {
@@ -160,9 +161,11 @@ fn walk_builder_with_file_set(dirs: Vec<&str>, file_set: Option<FileSet>) -> Res
                         .add(&format!("*.{}", ext))
                         .context("Unable to register extension with directory walker")?;
                 }
-                builder.overrides(override_builder
-                    .build()
-                    .context("Unable to register extensions with directory walker")?);
+                builder.overrides(
+                    override_builder
+                        .build()
+                        .context("Unable to register extensions with directory walker")?,
+                );
             }
             Glob {
                 matches,
@@ -180,9 +183,11 @@ fn walk_builder_with_file_set(dirs: Vec<&str>, file_set: Option<FileSet>) -> Res
                         .add(&file)
                         .context("Unable to register glob with directory walker")?;
                 }
-                builder.overrides(override_builder
-                    .build()
-                    .context("Unable to register glob with directory walker")?);
+                builder.overrides(
+                    override_builder
+                        .build()
+                        .context("Unable to register glob with directory walker")?,
+                );
             }
         }
     }
@@ -387,9 +392,7 @@ impl Fastmod {
                 Ok(true)
             }
             'q' => exit(0),
-            'n' => {
-                Ok(false)
-            }
+            'n' => Ok(false),
             _ => unreachable!(),
         }
     }
@@ -612,10 +615,12 @@ impl Fastmod {
                     let contents = slurped.expect("checked for error above");
                     let patching_result = fm.fast_patch(&regex, &subst, path, &contents);
                     match patching_result {
-                        Ok(changed_file) => if should_record_changed_files && changed_file {
-                            let mut changed_files = changed_files.lock().unwrap();
-                            changed_files.push(path.to_owned())
-                        },
+                        Ok(changed_file) => {
+                            if should_record_changed_files && changed_file {
+                                let mut changed_files = changed_files.lock().unwrap();
+                                changed_files.push(path.to_owned())
+                            }
+                        }
                         Err(error) => writeln!(::std::io::stderr(), "{}", display_warning(&error))
                             .expect("error writing to stderr"),
                     }
@@ -763,11 +768,7 @@ compatibility with the original codemod.",
         let mut dirs: Vec<_> = matches
             .values_of("dir")
             .unwrap_or_default()
-            .chain(
-                matches
-                    .values_of("file-or-dir")
-                    .unwrap_or_default(),
-            )
+            .chain(matches.values_of("file-or-dir").unwrap_or_default())
             .collect();
         if dirs.is_empty() {
             dirs.push(".");
@@ -934,7 +935,8 @@ mod tests {
                 b"foo\n"
             } else {
                 b"bar\n"
-            }).unwrap();
+            })
+            .unwrap();
             file.sync_all().unwrap();
         }
         Assert::main_binary()
