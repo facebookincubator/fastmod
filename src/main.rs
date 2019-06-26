@@ -68,11 +68,7 @@ fn get_file_set(matches: &clap::ArgMatches) -> Option<FileSet> {
 }
 
 fn notify_fast_mode() {
-    writeln!(
-        ::std::io::stderr(),
-        "Fast mode activated. Sit back, relax, and enjoy the brief flight."
-    )
-    .expect("error writing to stderr");
+    eprintln!("Fast mode activated. Sit back, relax, and enjoy the brief flight.");
 }
 
 fn slurp(path: &Path) -> Result<String> {
@@ -468,8 +464,7 @@ impl Fastmod {
             // interactive input from a human, so we simply can't use
             // *that* much memory in modern terms.
             for error in errors {
-                writeln!(::std::io::stderr(), "{}", display_warning(&error))
-                    .expect("error writing to stderr");
+                eprintln!("{}", display_warning(&error));
             }
         });
 
@@ -571,8 +566,7 @@ impl Fastmod {
             let changed_files = changed_files_inner.clone();
             Box::new(move |result| {
                 if let Err(error) = result {
-                    writeln!(::std::io::stderr(), "Warning: {}", &error)
-                        .expect("error writing to stderr");
+                    eprintln!("Warning: {}", &error);
                     return WalkState::Continue;
                 }
                 let dirent = result.unwrap();
@@ -591,8 +585,7 @@ impl Fastmod {
                     }
                     let slurped = slurp(path);
                     if let Err(error) = slurped {
-                        writeln!(::std::io::stderr(), "{}", display_warning(&error))
-                            .expect("error writing to stderr");
+                        eprintln!("{}", display_warning(&error));
                         return WalkState::Continue;
                     }
                     let contents = slurped.expect("checked for error above");
@@ -604,8 +597,7 @@ impl Fastmod {
                                 changed_files.push(path.to_owned())
                             }
                         }
-                        Err(error) => writeln!(::std::io::stderr(), "{}", display_warning(&error))
-                            .expect("error writing to stderr"),
+                        Err(error) => eprintln!("{}", display_warning(&error)),
                     }
                 }
                 WalkState::Continue
@@ -784,7 +776,7 @@ compatibility with the original codemod.",
 
 fn main() {
     if let Err(e) = fastmod() {
-        write!(::std::io::stderr(), "{:?}", e).expect("Couldn't write to stderr");
+        eprint!("{:?}", e);
     }
 }
 
