@@ -776,7 +776,6 @@ compatibility with the original codemod.",
     let subst = matches.value_of("subst").expect("subst is required!");
 
     if accept_all {
-        notify_fast_mode();
         Fastmod::run_fast(&regex, subst, dirs, file_set, print_changed_files)
     } else {
         Fastmod::new(accept_all, print_changed_files).run_interactive(&regex, subst, dirs, file_set)
