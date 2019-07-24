@@ -30,7 +30,8 @@ NOTE: Whereas `codemod` uses Python regexes, `fastmod` uses the Rust
 [regex](https://github.com/rust-lang/regex) crate, which supports a
 slightly different regex syntax and does not support look around or
 backreferences. In particular, use `${1}` instead of `\1` to get the
-contents of the first capture group. See the regex crate's
+contents of the first capture group, and use `$$` to write a literal
+`$` in the replacement string. See the regex crate's
 [documentation](https://docs.rs/regex/#syntax) for details.
 
 A consequence of this syntax is that the use of single quotes instead
