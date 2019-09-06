@@ -303,12 +303,10 @@ impl Fastmod {
                             &new_contents,
                         )?;
                         if accepted {
-                            // If the substitution is zero length, need to
-                            // restart from the *same* position!
-                            offset = offset + mat.start() + min(1, subst.len());
+                            offset = offset + mat.start() + subst.len();
                         } else {
-                            // Need to advance even if the substitution is zero length.
-                            offset = offset + mat.start() + 1;
+                            // Advance to the next character after the match.
+                            offset = offset + mat.end() + 1;
                         }
                     }
                 }
@@ -953,5 +951,24 @@ mod tests {
         let mut contents = String::new();
         f1.read_to_string(&mut contents).unwrap();
         assert_eq!(contents, "");
+    }
+
+    #[test]
+    fn test_replacement_matches_search() {
+        let dir = TempDir::new("fastmodtest").unwrap();
+        let file_path = dir.path().join("foo.txt");
+        {
+            let mut f1 = File::create(file_path.clone()).unwrap();
+            f1.write_all(b"foo").unwrap();
+            f1.sync_all().unwrap();
+        }
+        let regex = RegexBuilder::new("foo").build().unwrap();
+        let mut fm = Fastmod::new(true, false);
+        fm.present_and_apply_patches(&regex, "foofoo", &file_path, "foo".into())
+            .unwrap();
+        let mut f1 = File::open(file_path).unwrap();
+        let mut contents = String::new();
+        f1.read_to_string(&mut contents).unwrap();
+        assert_eq!(contents, "foofoo");
     }
 }
