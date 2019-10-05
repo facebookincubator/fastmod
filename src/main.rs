@@ -444,6 +444,7 @@ impl Fastmod {
 
     fn run_interactive(
         &mut self,
+        threads: &str,
         regex: &Regex,
         subst: &str,
         dirs: Vec<&str>,
@@ -502,6 +503,7 @@ impl Fastmod {
                         self.term.clear();
                         notify_fast_mode();
                         return Fastmod::run_fast_impl(
+                            threads,
                             regex,
                             subst,
                             dirs,
@@ -518,6 +520,7 @@ impl Fastmod {
     }
 
     fn run_fast(
+        threads: &str,
         regex: &Regex,
         subst: &str,
         dirs: Vec<&str>,
@@ -525,6 +528,7 @@ impl Fastmod {
         print_changed_files: bool,
     ) -> Result<()> {
         Fastmod::run_fast_impl(
+            threads,
             regex,
             subst,
             dirs,
@@ -539,6 +543,7 @@ impl Fastmod {
     }
 
     fn run_fast_impl(
+        threads: &str,
         regex: &Regex,
         subst: &str,
         dirs: Vec<&str>,
@@ -546,9 +551,9 @@ impl Fastmod {
         changed_files: Option<Vec<PathBuf>>,
         visited: Option<HashSet<PathBuf>>,
     ) -> Result<()> {
+        let num_threads = threads.parse::<usize>()?;
         let walk = walk_builder_with_file_set(dirs, file_set)?
-            // TODO: make number of threads configurable.
-            .threads(min(12, num_cpus::get()))
+            .threads(num_threads)
             .build_parallel();
         let visited = Arc::new(visited);
         let should_record_changed_files = changed_files.is_some();
@@ -613,6 +618,7 @@ impl Fastmod {
 }
 
 fn fastmod() -> Result<()> {
+    let cpus = num_cpus::get().to_string();
     let matches = App::new("fastmod")
         .about("fastmod is a fast partial replacement for codemod.")
         .version(crate_version!())
@@ -650,6 +656,14 @@ escape $ characters properly!",
                 .short("m")
                 .long("multiline")
                 .help("Have regex work over multiple lines (i.e., have dot match newlines)."),
+        )
+        .arg(
+            Arg::with_name("threads")
+                .short("j")
+                .long("threads")
+                .value_name("THREADS")
+                .default_value(&cpus)
+                .help("Configure the number of threads to use.")
         )
         .arg(
             Arg::with_name("dir")
@@ -738,6 +752,7 @@ compatibility with the original codemod.",
         )
         .get_matches();
     let multiline = matches.is_present("multiline");
+    let threads = matches.value_of("threads").unwrap_or_default();
     let dirs = {
         let mut dirs: Vec<_> = matches
             .values_of("dir")
@@ -763,13 +778,15 @@ compatibility with the original codemod.",
         .case_insensitive(ignore_case)
         .multi_line(true) // match codemod behavior for ^ and $.
         .dot_matches_new_line(multiline)
-        .build().with_context(|_| format!("Unable to make regex from {}", regex_str))?;
+        .build()
+        .with_context(|_| format!("Unable to make regex from {}", regex_str))?;
     let subst = matches.value_of("subst").expect("subst is required!");
 
     if accept_all {
-        Fastmod::run_fast(&regex, subst, dirs, file_set, print_changed_files)
+        Fastmod::run_fast(threads, &regex, subst, dirs, file_set, print_changed_files)
     } else {
-        Fastmod::new(accept_all, print_changed_files).run_interactive(&regex, subst, dirs, file_set)
+        Fastmod::new(accept_all, print_changed_files)
+            .run_interactive(threads, &regex, subst, dirs, file_set)
     }
 }
 
