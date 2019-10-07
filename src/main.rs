@@ -444,7 +444,7 @@ impl Fastmod {
 
     fn run_interactive(
         &mut self,
-        threads: &str,
+        threads: usize,
         regex: &Regex,
         subst: &str,
         dirs: Vec<&str>,
@@ -520,7 +520,7 @@ impl Fastmod {
     }
 
     fn run_fast(
-        threads: &str,
+        threads: usize,
         regex: &Regex,
         subst: &str,
         dirs: Vec<&str>,
@@ -543,7 +543,7 @@ impl Fastmod {
     }
 
     fn run_fast_impl(
-        threads: &str,
+        threads: usize,
         regex: &Regex,
         subst: &str,
         dirs: Vec<&str>,
@@ -551,9 +551,8 @@ impl Fastmod {
         changed_files: Option<Vec<PathBuf>>,
         visited: Option<HashSet<PathBuf>>,
     ) -> Result<()> {
-        let num_threads = threads.parse::<usize>()?;
         let walk = walk_builder_with_file_set(dirs, file_set)?
-            .threads(num_threads)
+            .threads(threads)
             .build_parallel();
         let visited = Arc::new(visited);
         let should_record_changed_files = changed_files.is_some();
@@ -752,7 +751,7 @@ compatibility with the original codemod.",
         )
         .get_matches();
     let multiline = matches.is_present("multiline");
-    let threads = matches.value_of("threads").unwrap_or_default();
+    let threads = matches.value_of("threads").unwrap_or_default().parse::<usize>()?;
     let dirs = {
         let mut dirs: Vec<_> = matches
             .values_of("dir")
