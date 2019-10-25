@@ -285,7 +285,7 @@ impl Fastmod {
         // 3) Ask the user to make a modification to the file.
         // 4) Re-read the file. (User may have made arbitrary edits!)
         let mut offset = 0;
-        loop {
+        while offset < contents.len() {
             {
                 let mat = regex.find(&contents[offset..]);
                 match mat {
@@ -971,5 +971,21 @@ mod tests {
         let mut contents = String::new();
         f1.read_to_string(&mut contents).unwrap();
         assert_eq!(contents, "foofoo");
+    }
+
+    #[test]
+    fn test_empty_contents() {
+        let dir = TempDir::new("fastmodtest").unwrap();
+        let file_path = dir.path().join("foo.txt");
+        {
+            let mut f1 = File::create(file_path.clone()).unwrap();
+            f1.write_all(b"foo").unwrap();
+            f1.sync_all().unwrap();
+        }
+        Assert::main_binary()
+            .with_args(&["foo", "baz", "--dir", dir.path().to_str().unwrap()])
+            .stdin("n\n")
+            .succeeds()
+            .unwrap();
     }
 }
