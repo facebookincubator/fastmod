@@ -25,8 +25,8 @@ use std::cmp::{max, min};
 use std::collections::HashSet;
 use std::env;
 use std::fmt;
-use std::fs::File;
-use std::io::{Read, Write};
+use std::fs::{read_to_string, File};
+use std::io::Write;
 use std::iter;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
@@ -70,14 +70,6 @@ fn get_file_set(matches: &clap::ArgMatches) -> Option<FileSet> {
 
 fn notify_fast_mode() {
     eprintln!("Fast mode activated. Sit back, relax, and enjoy the brief flight.");
-}
-
-fn slurp(path: &Path) -> Result<String> {
-    let mut file = File::open(path).with_context(|_| format!("Unable to open {:?}", path))?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)
-        .with_context(|_| format!("Unable to read {:?}", path))?;
-    Ok(contents)
 }
 
 fn run_editor(path: &Path, start_line: usize) -> Result<()> {
@@ -313,7 +305,7 @@ impl Fastmod {
                 }
             }
             // re-open file in case contents changed.
-            contents = slurp(path)?;
+            contents = read_to_string(path)?;
         }
         Ok(())
     }
@@ -487,9 +479,9 @@ impl Fastmod {
                 if !looks_like_code(path) {
                     continue;
                 }
-                let slurped = slurp(path);
+                let slurped = read_to_string(path);
                 if let Err(error) = slurped {
-                    errors.push(error);
+                    errors.push(error.into());
                     continue;
                 }
                 let contents = slurped.expect("checked for error above");
@@ -582,9 +574,9 @@ impl Fastmod {
                     if !looks_like_code(path) {
                         return WalkState::Continue;
                     }
-                    let slurped = slurp(path);
+                    let slurped = read_to_string(path);
                     if let Err(error) = slurped {
-                        eprintln!("{}", display_warning(&error));
+                        eprintln!("{}", display_warning(&error.into()));
                         return WalkState::Continue;
                     }
                     let contents = slurped.expect("checked for error above");
@@ -815,9 +807,7 @@ mod tests {
                 dir.path().to_str().unwrap(),
             ])
             .unwrap();
-        let mut f1 = File::open(file_path).unwrap();
-        let mut contents = String::new();
-        f1.read_to_string(&mut contents).unwrap();
+        let contents = read_to_string(file_path).unwrap();
         assert_eq!(contents, "bar\nbar blah bar");
     }
 
@@ -844,9 +834,9 @@ mod tests {
             ])
             .unwrap();
 
-        let lower_translated = slurp(&lower).unwrap();
-        let upper_translated = slurp(&upper).unwrap();
-        let skipped_translated = slurp(&skipped).unwrap();
+        let lower_translated = read_to_string(&lower).unwrap();
+        let upper_translated = read_to_string(&upper).unwrap();
+        let skipped_translated = read_to_string(&skipped).unwrap();
         assert_eq!(lower_translated, "some great text");
         assert_eq!(upper_translated, "some more great text");
         assert_eq!(
@@ -870,9 +860,7 @@ mod tests {
                 "--fixed-strings",
             ])
             .unwrap();
-        let mut f1 = File::open(file_path).unwrap();
-        let mut contents = String::new();
-        f1.read_to_string(&mut contents).unwrap();
+        let contents = read_to_string(file_path).unwrap();
         assert_eq!(contents, "baz\nfoooobar");
     }
 
@@ -948,9 +936,7 @@ mod tests {
         let mut fm = Fastmod::new(true, false);
         fm.present_and_apply_patches(&regex, "", &file_path, "foofoo".into())
             .unwrap();
-        let mut f1 = File::open(file_path).unwrap();
-        let mut contents = String::new();
-        f1.read_to_string(&mut contents).unwrap();
+        let contents = read_to_string(file_path).unwrap();
         assert_eq!(contents, "");
     }
 
@@ -967,9 +953,7 @@ mod tests {
         let mut fm = Fastmod::new(true, false);
         fm.present_and_apply_patches(&regex, "foofoo", &file_path, "foo".into())
             .unwrap();
-        let mut f1 = File::open(file_path).unwrap();
-        let mut contents = String::new();
-        f1.read_to_string(&mut contents).unwrap();
+        let contents = read_to_string(file_path).unwrap();
         assert_eq!(contents, "foofoo");
     }
 
