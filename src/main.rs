@@ -25,8 +25,7 @@ use std::cmp::{max, min};
 use std::collections::HashSet;
 use std::env;
 use std::fmt;
-use std::fs::{read_to_string, File};
-use std::io::Write;
+use std::fs::{self, read_to_string};
 use std::iter;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
@@ -222,9 +221,7 @@ impl Fastmod {
     }
 
     fn save(&mut self, path: &Path, text: &str) -> Result<()> {
-        let mut file = File::create(path).with_context(|_| format!("Unable to open {:?}", path))?;
-        file.write_all(text.as_bytes())
-            .with_context(|_| format!("Unable to write to {:?}", path))?;
+        fs::write(path, text).with_context(|_| format!("Unable to write to {:?}", path))?;
         self.record_change(path.to_owned());
         Ok(())
     }
@@ -776,6 +773,8 @@ fn main() {
 mod tests {
     use super::*;
     use assert_cli::Assert;
+    use std::fs::File;
+    use std::io::Write;
     use tempdir::TempDir;
 
     #[test]
