@@ -29,7 +29,9 @@ use std::fs::{self, read_to_string};
 use std::iter;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 mod terminal;
 
@@ -439,21 +441,47 @@ impl Fastmod {
         dirs: Vec<&str>,
         file_set: Option<FileSet>,
     ) -> Result<()> {
-        // Doing everything in serial seems fine for interactive
-        // mode. We find the next file to show the user quickly
-        // enough, and the user can't read patches concurrently
-        // anyway.
-        let walk = walk_builder_with_file_set(dirs.clone(), file_set.clone())?.build();
-        let mut errors = scopeguard::guard(Vec::new(), |errors| {
-            // We print all errors at the end because our constant screen
-            // clearing makes them difficult to see during the normal
-            // workflow. Yes, this makes our memory usage linear in the
-            // number of errors, but in this mode, we are taking
-            // interactive input from a human, so we simply can't use
-            // *that* much memory in modern terms.
-            for error in errors {
-                eprintln!("{}", display_warning(&error));
-            }
+        let walk = walk_builder_with_file_set(dirs.clone(), file_set.clone())?
+            .threads(min(12, num_cpus::get()))
+            .build_parallel();
+        let (tx, rx) = channel();
+        let thread_regex = regex.clone();
+        thread::spawn(|| {
+            walk.run(move || {
+                let tx = tx.clone();
+                let regex = thread_regex.clone();
+                Box::new(move |result| {
+                    let dirent = match result {
+                        Ok(d) => d,
+                        Err(e) => {
+                            eprintln!("Warning: {}", &e);
+                            return WalkState::Continue;
+                        }
+                    };
+                    if let Some(file_type) = dirent.file_type() {
+                        if !file_type.is_file() {
+                            return WalkState::Continue;
+                        }
+                        let path = dirent.path();
+                        if !looks_like_code(path) {
+                            return WalkState::Continue;
+                        }
+                        let contents = match read_to_string(&path) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                eprintln!("{}", display_warning(&e.into()));
+                                return WalkState::Continue;
+                            }
+                        };
+                        if regex.is_match(&contents) {
+                            if tx.send((path.to_path_buf(), contents)).is_err() {
+                                return WalkState::Quit;
+                            }
+                        }
+                    }
+                    WalkState::Continue
+                })
+            })
         });
 
         // We have to keep track of which paths we've visited so that
@@ -465,42 +493,24 @@ impl Fastmod {
         // support bookmarks, this set presumably isn't going to grow so large
         // that the memory usage becomes a concern.
         let mut visited = HashSet::default();
-        for result in walk {
-            let dirent = result.context("Error walking directory hierarchy")?;
-            if let Some(file_type) = dirent.file_type() {
-                if !file_type.is_file() {
-                    continue;
-                }
-                let path = dirent.path();
-                visited.insert(path.to_path_buf());
-                if !looks_like_code(path) {
-                    continue;
-                }
-                let slurped = read_to_string(path);
-                if let Err(error) = slurped {
-                    errors.push(error.into());
-                    continue;
-                }
-                let contents = slurped.expect("checked for error above");
-                if regex.is_match(&contents) {
-                    self.present_and_apply_patches(regex, subst, path, contents)?;
-                    if self.yes_to_all {
-                        // Kick over into fast mode. We restart the
-                        // search, but we have our visited set so that
-                        // we won't apply changes to files the user
-                        // has already addressed.
-                        self.term.clear();
-                        notify_fast_mode();
-                        return Fastmod::run_fast_impl(
-                            regex,
-                            subst,
-                            dirs,
-                            file_set,
-                            self.changed_files.clone(),
-                            Some(visited),
-                        );
-                    }
-                }
+        while let Ok((path, contents)) = rx.recv() {
+            visited.insert(path.clone());
+            self.present_and_apply_patches(&regex, subst, &path, contents)?;
+            if self.yes_to_all {
+                // Kick over into fast mode. We restart the
+                // search, but we have our visited set so that
+                // we won't apply changes to files the user
+                // has already addressed.
+                self.term.clear();
+                notify_fast_mode();
+                return Fastmod::run_fast_impl(
+                    &regex,
+                    subst,
+                    dirs,
+                    file_set,
+                    self.changed_files.clone(),
+                    Some(visited),
+                );
             }
         }
         self.print_changed_files_if_needed();
@@ -537,7 +547,6 @@ impl Fastmod {
         visited: Option<HashSet<PathBuf>>,
     ) -> Result<()> {
         let walk = walk_builder_with_file_set(dirs, file_set)?
-            // TODO: make number of threads configurable.
             .threads(min(12, num_cpus::get()))
             .build_parallel();
         let visited = Arc::new(visited);
@@ -553,11 +562,13 @@ impl Fastmod {
             let visited = visited.clone();
             let changed_files = changed_files_inner.clone();
             Box::new(move |result| {
-                if let Err(error) = result {
-                    eprintln!("Warning: {}", &error);
-                    return WalkState::Continue;
-                }
-                let dirent = result.unwrap();
+                let dirent = match result {
+                    Ok(d) => d,
+                    Err(e) => {
+                        eprintln!("Warning: {}", &e);
+                        return WalkState::Continue;
+                    }
+                };
                 if let Some(file_type) = dirent.file_type() {
                     if !file_type.is_file() {
                         return WalkState::Continue;
