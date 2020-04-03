@@ -17,6 +17,8 @@
 use clap::{crate_version, App, Arg};
 use diff::Result as DiffResult;
 use failure::{ensure, Error, ResultExt};
+use grep::regex::{RegexMatcher, RegexMatcherBuilder};
+use grep::searcher::{BinaryDetection, Searcher, SearcherBuilder, Sink, SinkMatch};
 use ignore::overrides::OverrideBuilder;
 use ignore::{WalkBuilder, WalkState};
 use regex::{Regex, RegexBuilder};
@@ -203,10 +205,33 @@ impl<'a> fmt::Display for DisplayWarning<'a> {
     }
 }
 
+struct FastmodSink {
+    did_match: bool,
+}
+
+impl FastmodSink {
+    fn new() -> Self {
+        Self { did_match: false }
+    }
+}
+
 struct Fastmod {
     yes_to_all: bool,
     changed_files: Option<Vec<PathBuf>>,
     term: Terminal,
+}
+
+impl Sink for FastmodSink {
+    type Error = std::io::Error;
+
+    fn matched(
+        &mut self,
+        _searcher: &Searcher,
+        _mat: &SinkMatch,
+    ) -> std::result::Result<bool, std::io::Error> {
+        self.did_match = true;
+        Ok(false)
+    }
 }
 
 impl Fastmod {
@@ -437,6 +462,7 @@ impl Fastmod {
     fn run_interactive(
         &mut self,
         regex: &Regex,
+        matcher: &RegexMatcher,
         subst: &str,
         dirs: Vec<&str>,
         file_set: Option<FileSet>,
@@ -445,11 +471,17 @@ impl Fastmod {
             .threads(min(12, num_cpus::get()))
             .build_parallel();
         let (tx, rx) = channel();
-        let thread_regex = regex.clone();
+        let matcher = matcher.clone();
         thread::spawn(|| {
             walk.run(move || {
+                let mut searcher = SearcherBuilder::new()
+                    .line_number(false)
+                    .multi_line(true)
+                    .binary_detection(BinaryDetection::quit(b'\x00'))
+                    .bom_sniffing(false)
+                    .build();
                 let tx = tx.clone();
-                let regex = thread_regex.clone();
+                let matcher = matcher.clone();
                 Box::new(move |result| {
                     let dirent = match result {
                         Ok(d) => d,
@@ -466,14 +498,18 @@ impl Fastmod {
                         if !looks_like_code(path) {
                             return WalkState::Continue;
                         }
-                        let contents = match read_to_string(&path) {
-                            Ok(c) => c,
-                            Err(e) => {
-                                eprintln!("{}", display_warning(&e.into()));
-                                return WalkState::Continue;
-                            }
-                        };
-                        if regex.is_match(&contents) {
+                        let mut sink = FastmodSink::new();
+                        if let Err(e) = searcher.search_path(&matcher, path, &mut sink) {
+                            eprintln!("{}", display_warning(&e.into()));
+                        }
+                        if sink.did_match {
+                            let contents = match read_to_string(&path) {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    eprintln!("{}", display_warning(&e.into()));
+                                    return WalkState::Continue;
+                                }
+                            };
                             if tx.send((path.to_path_buf(), contents)).is_err() {
                                 return WalkState::Quit;
                             }
@@ -765,12 +801,18 @@ compatibility with the original codemod.",
         .multi_line(true) // match codemod behavior for ^ and $.
         .dot_matches_new_line(multiline)
         .build().with_context(|_| format!("Unable to make regex from {}", regex_str))?;
+    let matcher = RegexMatcherBuilder::new()
+        .case_insensitive(ignore_case)
+        .multi_line(true)
+        .dot_matches_new_line(multiline)
+        .build(&maybe_escaped_regex)?;
     let subst = matches.value_of("subst").expect("subst is required!");
 
     if accept_all {
         Fastmod::run_fast(&regex, subst, dirs, file_set, print_changed_files)
     } else {
-        Fastmod::new(accept_all, print_changed_files).run_interactive(&regex, subst, dirs, file_set)
+        Fastmod::new(accept_all, print_changed_files)
+            .run_interactive(&regex, &matcher, subst, dirs, file_set)
     }
 }
 
