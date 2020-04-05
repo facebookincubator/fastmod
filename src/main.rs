@@ -186,6 +186,37 @@ fn display_warning(error: &Error) -> DisplayWarning {
     DisplayWarning { inner: error }
 }
 
+fn make_searcher() -> Searcher {
+    SearcherBuilder::new()
+        .line_number(false)
+        .multi_line(true)
+        .binary_detection(BinaryDetection::quit(b'\x00'))
+        .bom_sniffing(false)
+        .build()
+}
+
+fn file_contents_if_matches(
+    searcher: &mut Searcher,
+    matcher: &RegexMatcher,
+    path: &Path,
+) -> Option<String> {
+    let mut sink = FastmodSink::new();
+    if let Err(e) = searcher.search_path(&matcher, path, &mut sink) {
+        eprintln!("{}", display_warning(&e.into()));
+    };
+    if sink.did_match {
+        match read_to_string(&path) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("{}", display_warning(&e.into()));
+                None
+            }
+        }
+    } else {
+        None
+    }
+}
+
 #[derive(Debug)]
 struct DisplayWarning<'a> {
     inner: &'a Error,
@@ -471,17 +502,12 @@ impl Fastmod {
             .threads(min(12, num_cpus::get()))
             .build_parallel();
         let (tx, rx) = channel();
-        let matcher = matcher.clone();
+        let thread_matcher = matcher.clone();
         thread::spawn(|| {
             walk.run(move || {
-                let mut searcher = SearcherBuilder::new()
-                    .line_number(false)
-                    .multi_line(true)
-                    .binary_detection(BinaryDetection::quit(b'\x00'))
-                    .bom_sniffing(false)
-                    .build();
+                let mut searcher = make_searcher();
                 let tx = tx.clone();
-                let matcher = matcher.clone();
+                let matcher = thread_matcher.clone();
                 Box::new(move |result| {
                     let dirent = match result {
                         Ok(d) => d,
@@ -498,18 +524,9 @@ impl Fastmod {
                         if !looks_like_code(path) {
                             return WalkState::Continue;
                         }
-                        let mut sink = FastmodSink::new();
-                        if let Err(e) = searcher.search_path(&matcher, path, &mut sink) {
-                            eprintln!("{}", display_warning(&e.into()));
-                        }
-                        if sink.did_match {
-                            let contents = match read_to_string(&path) {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    eprintln!("{}", display_warning(&e.into()));
-                                    return WalkState::Continue;
-                                }
-                            };
+                        if let Some(contents) =
+                            file_contents_if_matches(&mut searcher, &matcher, path)
+                        {
                             if tx.send((path.to_path_buf(), contents)).is_err() {
                                 return WalkState::Quit;
                             }
@@ -541,6 +558,7 @@ impl Fastmod {
                 notify_fast_mode();
                 return Fastmod::run_fast_impl(
                     &regex,
+                    &matcher,
                     subst,
                     dirs,
                     file_set,
@@ -555,6 +573,7 @@ impl Fastmod {
 
     fn run_fast(
         regex: &Regex,
+        matcher: &RegexMatcher,
         subst: &str,
         dirs: Vec<&str>,
         file_set: Option<FileSet>,
@@ -562,6 +581,7 @@ impl Fastmod {
     ) -> Result<()> {
         Fastmod::run_fast_impl(
             regex,
+            matcher,
             subst,
             dirs,
             file_set,
@@ -576,6 +596,7 @@ impl Fastmod {
 
     fn run_fast_impl(
         regex: &Regex,
+        matcher: &RegexMatcher,
         subst: &str,
         dirs: Vec<&str>,
         file_set: Option<FileSet>,
@@ -585,6 +606,7 @@ impl Fastmod {
         let walk = walk_builder_with_file_set(dirs, file_set)?
             .threads(min(12, num_cpus::get()))
             .build_parallel();
+        let matcher = matcher.clone();
         let visited = Arc::new(visited);
         let should_record_changed_files = changed_files.is_some();
         let changed_files = Arc::new(Mutex::new(changed_files.unwrap_or_else(Vec::new)));
@@ -594,9 +616,11 @@ impl Fastmod {
             // enable it in our Fastmod instance.
             let mut fm = Fastmod::new(true, false);
             let regex = regex.clone();
+            let matcher = matcher.clone();
             let subst = subst.to_string();
             let visited = visited.clone();
             let changed_files = changed_files_inner.clone();
+            let mut searcher = make_searcher();
             Box::new(move |result| {
                 let dirent = match result {
                     Ok(d) => d,
@@ -618,21 +642,18 @@ impl Fastmod {
                     if !looks_like_code(path) {
                         return WalkState::Continue;
                     }
-                    let slurped = read_to_string(path);
-                    if let Err(error) = slurped {
-                        eprintln!("{}", display_warning(&error.into()));
-                        return WalkState::Continue;
-                    }
-                    let contents = slurped.expect("checked for error above");
-                    let patching_result = fm.fast_patch(&regex, &subst, path, &contents);
-                    match patching_result {
-                        Ok(changed_file) => {
-                            if should_record_changed_files && changed_file {
-                                let mut changed_files = changed_files.lock().unwrap();
-                                changed_files.push(path.to_owned())
+                    if let Some(contents) = file_contents_if_matches(&mut searcher, &matcher, path)
+                    {
+                        let patching_result = fm.fast_patch(&regex, &subst, path, &contents);
+                        match patching_result {
+                            Ok(changed_file) => {
+                                if should_record_changed_files && changed_file {
+                                    let mut changed_files = changed_files.lock().unwrap();
+                                    changed_files.push(path.to_owned())
+                                }
                             }
+                            Err(error) => eprintln!("{}", display_warning(&error)),
                         }
-                        Err(error) => eprintln!("{}", display_warning(&error)),
                     }
                 }
                 WalkState::Continue
@@ -809,7 +830,7 @@ compatibility with the original codemod.",
     let subst = matches.value_of("subst").expect("subst is required!");
 
     if accept_all {
-        Fastmod::run_fast(&regex, subst, dirs, file_set, print_changed_files)
+        Fastmod::run_fast(&regex, &matcher, subst, dirs, file_set, print_changed_files)
     } else {
         Fastmod::new(accept_all, print_changed_files)
             .run_interactive(&regex, &matcher, subst, dirs, file_set)
