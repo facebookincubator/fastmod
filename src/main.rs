@@ -846,7 +846,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assert_cli::Assert;
+    use assert_cmd::Command;
     use std::fs::File;
     use std::io::Write;
     use tempdir::TempDir;
@@ -871,15 +871,17 @@ mod tests {
         let dir = TempDir::new("fastmodtest").unwrap();
         let file_path = dir.path().join("file1.c");
         create_and_write_file(&file_path, "foo\nfoo blah foo");
-        Assert::main_binary()
-            .with_args(&[
+        Command::cargo_bin("fastmod")
+            .unwrap()
+            .args(&[
                 "foo",
                 "bar",
                 "--accept-all",
                 "--dir",
                 dir.path().to_str().unwrap(),
             ])
-            .unwrap();
+            .assert()
+            .success();
         let contents = read_to_string(file_path).unwrap();
         assert_eq!(contents, "bar\nbar blah bar");
     }
@@ -895,8 +897,9 @@ mod tests {
         create_and_write_file(&upper, "some more awesome text");
         create_and_write_file(&skipped, "i should be skipped but i am still awesome");
 
-        Assert::main_binary()
-            .with_args(&[
+        Command::cargo_bin("fastmod")
+            .unwrap()
+            .args(&[
                 "awesome",
                 "great",
                 "--accept-all",
@@ -905,7 +908,8 @@ mod tests {
                 "--dir",
                 dir.path().to_str().unwrap(),
             ])
-            .unwrap();
+            .assert()
+            .success();
 
         let lower_translated = read_to_string(&lower).unwrap();
         let upper_translated = read_to_string(&upper).unwrap();
@@ -923,8 +927,9 @@ mod tests {
         let dir = TempDir::new("fastmodtest").unwrap();
         let file_path = dir.path().join("file1.txt");
         create_and_write_file(&file_path, "foo+bar\nfoooobar");
-        Assert::main_binary()
-            .with_args(&[
+        Command::cargo_bin("fastmod")
+            .unwrap()
+            .args(&[
                 "foo+bar",
                 "baz",
                 "--accept-all",
@@ -932,7 +937,8 @@ mod tests {
                 dir.path().to_str().unwrap(),
                 "--fixed-strings",
             ])
-            .unwrap();
+            .assert()
+            .success();
         let contents = read_to_string(file_path).unwrap();
         assert_eq!(contents, "baz\nfoooobar");
     }
@@ -963,6 +969,7 @@ mod tests {
     #[test]
     fn test_print_changed_files() {
         let dir = TempDir::new("fastmodtest").unwrap();
+        let mut expected_changed_files = Vec::new();
         for file_num in 1..6 {
             let path = dir.path().join(format!("file{}.c", file_num));
             let mut file = File::create(path.clone()).unwrap();
@@ -973,9 +980,13 @@ mod tests {
             })
             .unwrap();
             file.sync_all().unwrap();
+            if file_num % 2 == 0 {
+                expected_changed_files.push(path.as_os_str().to_string_lossy().into_owned());
+            }
         }
-        Assert::main_binary()
-            .with_args(&[
+        Command::cargo_bin("fastmod")
+            .unwrap()
+            .args(&[
                 "foo",
                 "baz",
                 "--accept-all",
@@ -983,17 +994,8 @@ mod tests {
                 "--dir",
                 dir.path().to_str().unwrap(),
             ])
-            .stdout()
-            .contains("file2.c")
-            .stdout()
-            .contains("file4.c")
-            .stdout()
-            .doesnt_contain("file1.c")
-            .stdout()
-            .doesnt_contain("file3.c")
-            .stdout()
-            .doesnt_contain("file5.c")
-            .unwrap();
+            .assert()
+            .stdout(format!("{}\n", expected_changed_files.join("\n")));
     }
 
     #[test]
@@ -1039,10 +1041,11 @@ mod tests {
             f1.write_all(b"foo").unwrap();
             f1.sync_all().unwrap();
         }
-        Assert::main_binary()
-            .with_args(&["foo", "baz", "--dir", dir.path().to_str().unwrap()])
-            .stdin("n\n")
-            .succeeds()
-            .unwrap();
+        Command::cargo_bin("fastmod")
+            .unwrap()
+            .args(&["foo", "baz", "--dir", dir.path().to_str().unwrap()])
+            .write_stdin("n\n")
+            .assert()
+            .success();
     }
 }
