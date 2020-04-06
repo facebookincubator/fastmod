@@ -87,20 +87,20 @@ $ ./target/release/fastmod --help
 ```
 
 ## Installing fastmod
-If you have built `fastmod` following the directions above, you can
-install it with `cargo install`. You can also have cargo build it from
-https://crates.io/ via `cargo install fastmod`.
+The easiest way to install fastmod is simply `cargo install
+fastmod`. If you have built `fastmod` from source following the
+directions above, you can install your build with `cargo install`.
 
 ## How `fastmod` works
 `fastmod` uses the
 [ignore](https://github.com/BurntSushi/ripgrep/tree/master/ignore)
-crate to walk the given directory hierarchy while respecting
-`.gitignore`. It reads each matching file into memory, applies the
-given regex substitution one match at a time, and uses the
+crate to walk the given directory hierarchy using multiple threads in
+parallel while respecting `.gitignore`. It uses the
+[grep](https://github.com/BurntSushi/ripgrep/tree/master/crates/grep)
+crate to match each file, reads matching files into memory, applies
+the given regex substitution one match at a time, and uses the
 [diff](https://github.com/utkarshkukreti/diff.rs) crate to present the
-resulting change as a patch for human review.
-In `--accept-all` mode, it walks the directory hierarchy using multiple
-threads in parallel and avoids calculating patches for efficiency.
+resulting changes as patches for human review.
 
 ## Full documentation
 
