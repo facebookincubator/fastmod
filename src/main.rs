@@ -37,7 +37,7 @@ use std::thread;
 
 mod terminal;
 
-use crate::terminal::Terminal;
+use crate::terminal::Color;
 use rprompt::prompt_reply_stdout;
 
 type Result<T> = ::std::result::Result<T, Error>;
@@ -249,7 +249,6 @@ impl FastmodSink {
 struct Fastmod {
     yes_to_all: bool,
     changed_files: Option<Vec<PathBuf>>,
-    term: Terminal,
 }
 
 impl Sink for FastmodSink {
@@ -274,7 +273,6 @@ impl Fastmod {
             } else {
                 None
             },
-            term: Terminal::new(),
         }
     }
 
@@ -374,7 +372,7 @@ impl Fastmod {
         end_line: usize,
         new: &'a str,
     ) -> Result<bool> {
-        self.term.clear();
+        terminal::clear();
 
         let diffs = self.diffs_to_print(old, new);
         if diffs.is_empty() {
@@ -430,7 +428,7 @@ impl Fastmod {
                 _ => false,
             }
         }
-        let lines_to_print = match ::term_size::dimensions() {
+        let lines_to_print = match terminal::size() {
             Some((_w, h)) => h,
             None => 25,
         } - 20;
@@ -476,15 +474,15 @@ impl Fastmod {
         for diff in diffs {
             match diff {
                 DiffResult::Left(l) => {
-                    self.term.fg(term::color::RED);
+                    terminal::fg(Color::Red);
                     println!("- {}", l);
-                    self.term.reset();
+                    terminal::reset();
                 }
                 DiffResult::Both(l, _) => println!("  {}", l),
                 DiffResult::Right(r) => {
-                    self.term.fg(term::color::GREEN);
+                    terminal::fg(Color::Green);
                     println!("+ {}", r);
-                    self.term.reset();
+                    terminal::reset();
                 }
             }
         }
@@ -554,7 +552,7 @@ impl Fastmod {
                 // search, but we have our visited set so that
                 // we won't apply changes to files the user
                 // has already addressed.
-                self.term.clear();
+                terminal::clear();
                 notify_fast_mode();
                 return Fastmod::run_fast_impl(
                     &regex,

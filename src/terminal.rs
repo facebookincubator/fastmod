@@ -14,48 +14,41 @@
  * limitations under the License.
  */
 
+use crossterm::style::SetForegroundColor;
+use crossterm::terminal::{Clear, ClearType};
+use crossterm::ExecutableCommand;
 use std::io;
-use term::color::Color;
-use term::terminfo::TermInfo;
-use term::{self, StdoutTerminal};
 
-pub struct Terminal {
-    ti: Option<TermInfo>,
-    term: Option<Box<StdoutTerminal>>,
+pub enum Color {
+    Red,
+    Green,
 }
 
-impl Terminal {
-    pub fn new() -> Terminal {
-        Terminal {
-            ti: TermInfo::from_env().ok(),
-            term: term::stdout(),
+impl Color {
+    pub fn to_crossterm_color(self) -> crossterm::style::Color {
+        match self {
+            Color::Red => crossterm::style::Color::Red,
+            Color::Green => crossterm::style::Color::Green,
         }
     }
+}
 
-    fn use_capability(&self, capability_name: &str) -> bool {
-        match self.ti {
-            None => false,
-            Some(ref ti) => ti
-                .apply_cap(capability_name, &[], &mut io::stdout())
-                .is_ok(),
-        }
+pub fn clear() {
+    if io::stdout().execute(Clear(ClearType::All)).is_err() {
+        print!("{}", "\n".repeat(8));
     }
+}
 
-    pub fn clear(&self) {
-        if !self.use_capability("clear") {
-            print!("{}", "\n".repeat(8));
-        }
-    }
+pub fn fg(color: Color) {
+    let _ = io::stdout().execute(SetForegroundColor(color.to_crossterm_color()));
+}
 
-    pub fn fg(&mut self, color: Color) {
-        if let Some(ref mut term) = self.term {
-            let _ = term.fg(color);
-        }
-    }
+pub fn reset() {
+    let _ = io::stdout().execute(SetForegroundColor(crossterm::style::Color::Reset));
+}
 
-    pub fn reset(&mut self) {
-        if let Some(ref mut term) = self.term {
-            let _ = term.reset();
-        }
-    }
+pub fn size() -> Option<(usize, usize)> {
+    crossterm::terminal::size()
+        .ok()
+        .map(|(w, h)| (w as usize, h as usize))
 }

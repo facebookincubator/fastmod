@@ -13,6 +13,7 @@ license = "Apache-2.0"
 
 [dependencies]
 clap = "2.31.2"
+crossterm = "0.17"
 diff = "0.1.11"
 failure = "0.1.1"
 grep = "0.2.5"
@@ -20,8 +21,6 @@ ignore = "0.4.1"
 num_cpus = "1.8.0"
 regex = "1.1.2"
 rprompt = "1.0.3"
-term = "0.6.1"
-term_size = "0.3"
 
 [dev-dependencies]
 assert_cmd = "1"
