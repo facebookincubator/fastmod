@@ -38,7 +38,7 @@ use std::thread;
 mod terminal;
 
 use crate::terminal::Color;
-use rprompt::prompt_reply_stdout;
+use rprompt::{prompt_reply_stderr, prompt_reply_stdout};
 
 type Result<T> = ::std::result::Result<T, Error>;
 
@@ -339,8 +339,18 @@ impl Fastmod {
                         let mut new_contents = contents[..offset].to_string();
                         let new_trailing_contents = regex.replace(&contents[offset..], subst);
                         new_contents.push_str(&new_trailing_contents);
+                        // Zero-length matches can happen with any
+                        // regex that matches the empty string,
+                        // such as `a?` or the empty regex.
+                        let is_zero_length_match = mat.end() == mat.start();
                         let (start_line, _) = index_to_row_col(&contents, mat.start() + offset);
-                        let (end_line, _) = index_to_row_col(&contents, mat.end() + offset - 1);
+                        let (end_line, _) = index_to_row_col(
+                            &contents,
+                            // Avoid generating index of -1 when start
+                            // == end == offset = 0 for a zero-length
+                            // match.
+                            mat.end() + offset - if is_zero_length_match { 0 } else { 1 },
+                        );
                         let accepted = self.ask_about_patch(
                             path,
                             &contents,
@@ -349,7 +359,12 @@ impl Fastmod {
                             &new_contents,
                         )?;
                         if accepted {
-                            offset = offset + mat.start() + subst.len();
+                            offset = offset
+                                + mat.start()
+                                + subst.len()
+                                // Ensure forward progress when there
+                                // is a zero-length match.
+                                + if is_zero_length_match { 1 } else { 0 };
                         } else {
                             // Advance to the next character after the match.
                             offset = offset + mat.end() + 1;
@@ -820,6 +835,13 @@ compatibility with the original codemod.",
         .multi_line(true) // match codemod behavior for ^ and $.
         .dot_matches_new_line(multiline)
         .build().with_context(|_| format!("Unable to make regex from {}", regex_str))?;
+    if regex.is_match("") {
+        let _ = prompt_reply_stderr(&format!(
+            "Warning: your regex {:?} matches the empty string. This is probably
+not what you want. Press Enter to continue anyway or Ctrl-C to quit.",
+            regex,
+        ))?;
+    }
     let matcher = RegexMatcherBuilder::new()
         .case_insensitive(ignore_case)
         .multi_line(true)
@@ -858,17 +880,22 @@ mod tests {
         assert_eq!(index_to_row_col("abc\ndef\nghi", 8), (2, 0));
     }
 
-    fn create_and_write_file(path: &Path, contents: &str) {
-        let mut f = File::create(path).unwrap();
-        f.write_all(contents.as_bytes()).unwrap();
-        f.sync_all().unwrap();
+    fn create_test_files<'a>(
+        names_and_contents: impl IntoIterator<Item = &'a (&'a str, &'a str)>,
+    ) -> TempDir {
+        let dir = TempDir::new("fastmodtest").unwrap();
+        for (name, contents) in names_and_contents {
+            let path = dir.path().join(name);
+            let mut file = File::create(path.clone()).unwrap();
+            file.write_all(contents.as_bytes()).unwrap();
+            file.sync_all().unwrap();
+        }
+        dir
     }
 
     #[test]
     fn test_simple_replace_all() {
-        let dir = TempDir::new("fastmodtest").unwrap();
-        let file_path = dir.path().join("file1.c");
-        create_and_write_file(&file_path, "foo\nfoo blah foo");
+        let dir = create_test_files(&[("file1.c", "foo\nfoo blah foo")]);
         Command::cargo_bin("fastmod")
             .unwrap()
             .args(&[
@@ -880,20 +907,17 @@ mod tests {
             ])
             .assert()
             .success();
-        let contents = read_to_string(file_path).unwrap();
+        let contents = read_to_string(dir.path().join("file1.c")).unwrap();
         assert_eq!(contents, "bar\nbar blah bar");
     }
 
     #[test]
     fn test_glob_matches() {
-        let dir = TempDir::new("fastmodtest").unwrap();
-        let lower = dir.path().join("f1.txt");
-        let upper = dir.path().join("f2.TXT");
-        let skipped = dir.path().join("skip.rs");
-
-        create_and_write_file(&lower, "some awesome text");
-        create_and_write_file(&upper, "some more awesome text");
-        create_and_write_file(&skipped, "i should be skipped but i am still awesome");
+        let dir = create_test_files(&[
+            ("f1.txt", "some awesome text"),
+            ("f2.TXT", "some more awesome text"),
+            ("skip.rs", "i should be skipped but i am still awesome"),
+        ]);
 
         Command::cargo_bin("fastmod")
             .unwrap()
@@ -909,9 +933,9 @@ mod tests {
             .assert()
             .success();
 
-        let lower_translated = read_to_string(&lower).unwrap();
-        let upper_translated = read_to_string(&upper).unwrap();
-        let skipped_translated = read_to_string(&skipped).unwrap();
+        let lower_translated = read_to_string(dir.path().join("f1.txt")).unwrap();
+        let upper_translated = read_to_string(dir.path().join("f2.TXT")).unwrap();
+        let skipped_translated = read_to_string(dir.path().join("skip.rs")).unwrap();
         assert_eq!(lower_translated, "some great text");
         assert_eq!(upper_translated, "some more great text");
         assert_eq!(
@@ -922,9 +946,8 @@ mod tests {
 
     #[test]
     fn test_fixed_strings() {
-        let dir = TempDir::new("fastmodtest").unwrap();
+        let dir = create_test_files(&[("file1.txt", "foo+bar\nfoooobar")]);
         let file_path = dir.path().join("file1.txt");
-        create_and_write_file(&file_path, "foo+bar\nfoooobar");
         Command::cargo_bin("fastmod")
             .unwrap()
             .args(&[
@@ -997,14 +1020,21 @@ mod tests {
     }
 
     #[test]
-    fn test_zero_length_replacement() {
-        let dir = TempDir::new("fastmodtest").unwrap();
+    fn test_zero_length_match() {
+        let dir = create_test_files(&[("foo.txt", "foo")]);
         let file_path = dir.path().join("foo.txt");
-        {
-            let mut f1 = File::create(file_path.clone()).unwrap();
-            f1.write_all(b"foofoo").unwrap();
-            f1.sync_all().unwrap();
-        }
+        let regex = RegexBuilder::new("").multi_line(true).build().unwrap();
+        let mut fm = Fastmod::new(true, false);
+        fm.present_and_apply_patches(&regex, "x", &file_path, "foo".into())
+            .unwrap();
+        let contents = read_to_string(file_path).unwrap();
+        assert_eq!(contents, "xfxoxo");
+    }
+
+    #[test]
+    fn test_zero_length_replacement() {
+        let dir = create_test_files(&[("foo.txt", "foofoo")]);
+        let file_path = dir.path().join("foo.txt");
         let regex = RegexBuilder::new("foo").multi_line(true).build().unwrap();
         let mut fm = Fastmod::new(true, false);
         fm.present_and_apply_patches(&regex, "", &file_path, "foofoo".into())
@@ -1015,13 +1045,8 @@ mod tests {
 
     #[test]
     fn test_replacement_matches_search() {
-        let dir = TempDir::new("fastmodtest").unwrap();
+        let dir = create_test_files(&[("foo.txt", "foo")]);
         let file_path = dir.path().join("foo.txt");
-        {
-            let mut f1 = File::create(file_path.clone()).unwrap();
-            f1.write_all(b"foo").unwrap();
-            f1.sync_all().unwrap();
-        }
         let regex = RegexBuilder::new("foo").build().unwrap();
         let mut fm = Fastmod::new(true, false);
         fm.present_and_apply_patches(&regex, "foofoo", &file_path, "foo".into())
@@ -1032,13 +1057,7 @@ mod tests {
 
     #[test]
     fn test_empty_contents() {
-        let dir = TempDir::new("fastmodtest").unwrap();
-        let file_path = dir.path().join("foo.txt");
-        {
-            let mut f1 = File::create(file_path.clone()).unwrap();
-            f1.write_all(b"foo").unwrap();
-            f1.sync_all().unwrap();
-        }
+        let dir = create_test_files(&[("foo.txt", "foo")]);
         Command::cargo_bin("fastmod")
             .unwrap()
             .args(&["foo", "baz", "--dir", dir.path().to_str().unwrap()])
