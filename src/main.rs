@@ -834,7 +834,8 @@ compatibility with the original codemod.",
         .case_insensitive(ignore_case)
         .multi_line(true) // match codemod behavior for ^ and $.
         .dot_matches_new_line(multiline)
-        .build().with_context(|_| format!("Unable to make regex from {}", regex_str))?;
+        .build()
+        .with_context(|_| format!("Unable to make regex from {}", regex_str))?;
     if regex.is_match("") {
         let _ = prompt_reply_stderr(&format!(
             "Warning: your regex {:?} matches the empty string. This is probably
