@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
+use anyhow::{ensure, Context, Error};
 use clap::{crate_version, App, Arg};
 use diff::Result as DiffResult;
-use failure::{ensure, Error, ResultExt};
 use grep::regex::{RegexMatcher, RegexMatcherBuilder};
 use grep::searcher::{BinaryDetection, Searcher, SearcherBuilder, Sink, SinkMatch};
 use ignore::overrides::OverrideBuilder;
@@ -84,15 +84,13 @@ fn run_editor(path: &Path, start_line: usize) -> Result<()> {
             .arg(format!("+{}", start_line))
             .arg(path)
             .spawn()
-            .with_context(|_| format!("Unable to launch editor {} on path {:?}", editor, path));
+            .with_context(|| format!("Unable to launch editor {} on path {:?}", editor, path));
         if cfg!(target_os = "windows") && cmd.is_err() {
             // Windows-only fallback to notepad.exe.
             cmd = Command::new("notepad.exe")
                 .arg(path)
                 .spawn()
-                .with_context(|_| {
-                    format!("Unable to launch editor notepad.exe on path {:?}", path)
-                });
+                .with_context(|| format!("Unable to launch editor notepad.exe on path {:?}", path));
         }
         cmd?
     };
@@ -224,14 +222,7 @@ struct DisplayWarning<'a> {
 
 impl<'a> fmt::Display for DisplayWarning<'a> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(fmt, "Warning: {}", self.inner.as_fail())?;
-
-        for e in self.inner.iter_chain().skip(1) {
-            writeln!(fmt, "Caused by: {}", e)?;
-        }
-
-        writeln!(fmt, "{:?}", self.inner.backtrace())?;
-
+        writeln!(fmt, "Warning: {:?}", self.inner)?;
         Ok(())
     }
 }
@@ -277,7 +268,7 @@ impl Fastmod {
     }
 
     fn save(&mut self, path: &Path, text: &str) -> Result<()> {
-        fs::write(path, text).with_context(|_| format!("Unable to write to {:?}", path))?;
+        fs::write(path, text).with_context(|| format!("Unable to write to {:?}", path))?;
         self.record_change(path.to_owned());
         Ok(())
     }
@@ -835,7 +826,7 @@ compatibility with the original codemod.",
         .multi_line(true) // match codemod behavior for ^ and $.
         .dot_matches_new_line(multiline)
         .build()
-        .with_context(|_| format!("Unable to make regex from {}", regex_str))?;
+        .with_context(|| format!("Unable to make regex from {}", regex_str))?;
     if regex.is_match("") {
         let _ = prompt_reply_stderr(&format!(
             "Warning: your regex {:?} matches the empty string. This is probably

@@ -12,10 +12,10 @@ categories = ["command-line-utilities", "development-tools"]
 license = "Apache-2.0"
 
 [dependencies]
+anyhow = "1.0"
 clap = "2.31.2"
 crossterm = "0.17"
 diff = "0.1.11"
-failure = "0.1.1"
 grep = "0.2.5"
 ignore = "0.4.1"
 num_cpus = "1.8.0"
