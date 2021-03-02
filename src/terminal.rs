@@ -27,8 +27,8 @@ pub enum Color {
 impl Color {
     pub fn to_crossterm_color(self) -> crossterm::style::Color {
         match self {
-            Color::Red => crossterm::style::Color::Red,
-            Color::Green => crossterm::style::Color::Green,
+            Color::Red => crossterm::style::Color::DarkRed,
+            Color::Green => crossterm::style::Color::DarkGreen,
         }
     }
 }
