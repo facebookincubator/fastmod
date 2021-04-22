@@ -256,6 +256,26 @@ impl Sink for FastmodSink {
     }
 }
 
+fn to_char_boundary(s: &str, mut index: usize) -> usize {
+    while index < s.len() && !s.is_char_boundary(index) {
+        index += 1;
+    }
+    debug_assert!(
+        index > s.len() || s.is_char_boundary(index),
+        "index: {}, len: {}",
+        index,
+        s.len()
+    );
+    index
+}
+
+fn backward_to_char_boundary(s: &str, mut index: usize) -> usize {
+    while !s.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
 impl Fastmod {
     fn new(accept_all: bool, hidden: bool, print_changed_files: bool) -> Fastmod {
         Fastmod {
@@ -342,7 +362,10 @@ impl Fastmod {
                             // Avoid generating index of -1 when start
                             // == end == offset = 0 for a zero-length
                             // match.
-                            mat.end() + offset - if is_zero_length_match { 0 } else { 1 },
+                            backward_to_char_boundary(
+                                &contents,
+                                mat.end() + offset - if is_zero_length_match { 0 } else { 1 },
+                            ),
                         );
                         let accepted = self.ask_about_patch(
                             path,
@@ -352,15 +375,18 @@ impl Fastmod {
                             &new_contents,
                         )?;
                         if accepted {
-                            offset = offset
+                            offset = to_char_boundary(
+                                &contents,
+                                offset
                                 + mat.start()
                                 + subst.len()
                                 // Ensure forward progress when there
                                 // is a zero-length match.
-                                + if is_zero_length_match { 1 } else { 0 };
+                                + if is_zero_length_match { 1 } else { 0 },
+                            );
                         } else {
                             // Advance to the next character after the match.
-                            offset = offset + mat.end() + 1;
+                            offset = to_char_boundary(&contents, offset + mat.end() + 1);
                         }
                     }
                 }
@@ -1108,5 +1134,22 @@ mod tests {
                 assert_eq!(contents, "foo");
             }
         }
+    }
+
+    #[test]
+    fn test_replace_next_to_unicode_character() {
+        let contents = "I have “unicodequotes”";
+        let dir = create_test_files(&[("foo.txt", contents)]);
+        Command::cargo_bin("fastmod")
+            .unwrap()
+            .args(&[
+                "quotes",
+                "characters",
+                "--dir",
+                dir.path().to_str().unwrap(),
+            ])
+            .write_stdin("n\n")
+            .assert()
+            .success();
     }
 }
