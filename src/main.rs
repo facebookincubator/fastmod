@@ -239,6 +239,7 @@ impl FastmodSink {
 
 struct Fastmod {
     yes_to_all: bool,
+    hidden: bool,
     changed_files: Option<Vec<PathBuf>>,
 }
 
@@ -256,9 +257,10 @@ impl Sink for FastmodSink {
 }
 
 impl Fastmod {
-    fn new(accept_all: bool, print_changed_files: bool) -> Fastmod {
+    fn new(accept_all: bool, hidden: bool, print_changed_files: bool) -> Fastmod {
         Fastmod {
             yes_to_all: accept_all,
+            hidden,
             changed_files: if print_changed_files {
                 Some(Vec::new())
             } else {
@@ -503,6 +505,7 @@ impl Fastmod {
         file_set: Option<FileSet>,
     ) -> Result<()> {
         let walk = walk_builder_with_file_set(dirs.clone(), file_set.clone())?
+            .hidden(!self.hidden)
             .threads(min(12, num_cpus::get()))
             .build_parallel();
         let (tx, rx) = channel();
@@ -566,6 +569,7 @@ impl Fastmod {
                     subst,
                     dirs,
                     file_set,
+                    self.hidden,
                     self.changed_files.clone(),
                     Some(visited),
                 );
@@ -581,6 +585,7 @@ impl Fastmod {
         subst: &str,
         dirs: Vec<&str>,
         file_set: Option<FileSet>,
+        hidden: bool,
         print_changed_files: bool,
     ) -> Result<()> {
         Fastmod::run_fast_impl(
@@ -589,6 +594,7 @@ impl Fastmod {
             subst,
             dirs,
             file_set,
+            hidden,
             if print_changed_files {
                 Some(Vec::new())
             } else {
@@ -604,10 +610,12 @@ impl Fastmod {
         subst: &str,
         dirs: Vec<&str>,
         file_set: Option<FileSet>,
+        hidden: bool,
         changed_files: Option<Vec<PathBuf>>,
         visited: Option<HashSet<PathBuf>>,
     ) -> Result<()> {
         let walk = walk_builder_with_file_set(dirs, file_set)?
+            .hidden(!hidden)
             .threads(min(12, num_cpus::get()))
             .build_parallel();
         let matcher = matcher.clone();
@@ -618,7 +626,7 @@ impl Fastmod {
         walk.run(move || {
             // We have to do our own changed file tracking, so don't
             // enable it in our Fastmod instance.
-            let mut fm = Fastmod::new(true, false);
+            let mut fm = Fastmod::new(true, hidden, false);
             let regex = regex.clone();
             let matcher = matcher.clone();
             let subst = subst.to_string();
@@ -761,6 +769,11 @@ compatibility with the original codemod.",
             .help("A space-delimited list of globs to process.")
         )
         .arg(
+            Arg::with_name("hidden")
+                .long("hidden")
+                .help("Search hidden files.")
+        )
+        .arg(
             Arg::with_name("iglob")
             .long("iglob")
             .value_name("IGLOB")
@@ -814,6 +827,7 @@ compatibility with the original codemod.",
     let ignore_case = matches.is_present("ignore_case");
     let file_set = get_file_set(&matches);
     let accept_all = matches.is_present("accept_all");
+    let hidden = matches.is_present("hidden");
     let print_changed_files = matches.is_present("print_changed_files");
     let regex_str = matches.value_of("match").expect("match is required!");
     let maybe_escaped_regex = if matches.is_present("fixed_strings") {
@@ -842,9 +856,17 @@ not what you want. Press Enter to continue anyway or Ctrl-C to quit.",
     let subst = matches.value_of("subst").expect("subst is required!");
 
     if accept_all {
-        Fastmod::run_fast(&regex, &matcher, subst, dirs, file_set, print_changed_files)
+        Fastmod::run_fast(
+            &regex,
+            &matcher,
+            subst,
+            dirs,
+            file_set,
+            hidden,
+            print_changed_files,
+        )
     } else {
-        Fastmod::new(accept_all, print_changed_files)
+        Fastmod::new(accept_all, hidden, print_changed_files)
             .run_interactive(&regex, &matcher, subst, dirs, file_set)
     }
 }
@@ -958,7 +980,7 @@ mod tests {
 
     #[test]
     fn test_diff_with_unchanged_line_in_middle() {
-        let fm = Fastmod::new(false, false);
+        let fm = Fastmod::new(false, false, false);
         let diffs = fm.diffs_to_print("foo\nbar\nbaz", "bat\nbar\nqux");
         assert_eq!(
             diffs,
@@ -974,7 +996,7 @@ mod tests {
 
     #[test]
     fn test_diff_no_changes() {
-        let fm = Fastmod::new(false, false);
+        let fm = Fastmod::new(false, false, false);
         let diffs = fm.diffs_to_print("foo", "foo");
         assert_eq!(diffs, vec![]);
     }
@@ -1016,7 +1038,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", "foo")]);
         let file_path = dir.path().join("foo.txt");
         let regex = RegexBuilder::new("").multi_line(true).build().unwrap();
-        let mut fm = Fastmod::new(true, false);
+        let mut fm = Fastmod::new(true, false, false);
         fm.present_and_apply_patches(&regex, "x", &file_path, "foo".into())
             .unwrap();
         let contents = read_to_string(file_path).unwrap();
@@ -1028,7 +1050,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", "foofoo")]);
         let file_path = dir.path().join("foo.txt");
         let regex = RegexBuilder::new("foo").multi_line(true).build().unwrap();
-        let mut fm = Fastmod::new(true, false);
+        let mut fm = Fastmod::new(true, false, false);
         fm.present_and_apply_patches(&regex, "", &file_path, "foofoo".into())
             .unwrap();
         let contents = read_to_string(file_path).unwrap();
@@ -1040,7 +1062,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", "foo")]);
         let file_path = dir.path().join("foo.txt");
         let regex = RegexBuilder::new("foo").build().unwrap();
-        let mut fm = Fastmod::new(true, false);
+        let mut fm = Fastmod::new(true, false, false);
         fm.present_and_apply_patches(&regex, "foofoo", &file_path, "foo".into())
             .unwrap();
         let contents = read_to_string(file_path).unwrap();
@@ -1056,5 +1078,37 @@ mod tests {
             .write_stdin("n\n")
             .assert()
             .success();
+    }
+
+    // Leading dot meaning hidden is a Unix thing.
+    #[cfg(target_family = "unix")]
+    #[test]
+    fn test_hidden_files() {
+        for &hidden in &[false, true] {
+            let dir = create_test_files(&[(".hidden", "foo")]);
+            let mut args = vec![
+                "foo",
+                "bar",
+                "--dir",
+                dir.path().to_str().unwrap(),
+                "--accept-all",
+            ];
+            if hidden {
+                args.push("--hidden");
+            }
+
+            Command::cargo_bin("fastmod")
+                .unwrap()
+                .args(&args)
+                .assert()
+                .success();
+            let file_path = dir.path().join(".hidden");
+            let contents = read_to_string(file_path).unwrap();
+            if hidden {
+                assert_eq!(contents, "bar");
+            } else {
+                assert_eq!(contents, "foo");
+            }
+        }
     }
 }
