@@ -467,12 +467,10 @@ impl Fastmod {
 
         assert!(
             diffs.len() <= max(lines_to_print, size_of_diff),
-            format!(
-                "changeset too long: {} > max({}, {})",
-                diffs.len(),
-                lines_to_print,
-                size_of_diff
-            )
+            "changeset too long: {} > max({}, {})",
+            diffs.len(),
+            lines_to_print,
+            size_of_diff
         );
 
         diffs
