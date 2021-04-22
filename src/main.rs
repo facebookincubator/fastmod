@@ -728,7 +728,7 @@ compatibility with the original codemod.",
                 .number_of_values(1),
         )
         .arg(
-            Arg::with_name("file-or-dir")
+            Arg::with_name("file_or_dir")
                 .value_name("FILE OR DIR")
                 .help("Paths whose descendent files are to be explored.")
                 .multiple(true)
@@ -804,7 +804,7 @@ compatibility with the original codemod.",
         let mut dirs: Vec<_> = matches
             .values_of("dir")
             .unwrap_or_default()
-            .chain(matches.values_of("file-or-dir").unwrap_or_default())
+            .chain(matches.values_of("file_or_dir").unwrap_or_default())
             .collect();
         if dirs.is_empty() {
             dirs.push(".");
