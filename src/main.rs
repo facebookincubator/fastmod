@@ -14,31 +14,48 @@
  * limitations under the License.
  */
 
-use anyhow::{ensure, Context, Error};
-use clap::{crate_version, App, Arg};
+use anyhow::ensure;
+use anyhow::Context;
+use anyhow::Error;
+use clap::crate_version;
+use clap::App;
+use clap::Arg;
 use diff::Result as DiffResult;
-use grep::regex::{RegexMatcher, RegexMatcherBuilder};
-use grep::searcher::{BinaryDetection, Searcher, SearcherBuilder, Sink, SinkMatch};
+use grep::regex::RegexMatcher;
+use grep::regex::RegexMatcherBuilder;
+use grep::searcher::BinaryDetection;
+use grep::searcher::Searcher;
+use grep::searcher::SearcherBuilder;
+use grep::searcher::Sink;
+use grep::searcher::SinkMatch;
 use ignore::overrides::OverrideBuilder;
-use ignore::{WalkBuilder, WalkState};
-use regex::{Regex, RegexBuilder};
+use ignore::WalkBuilder;
+use ignore::WalkState;
+use regex::Regex;
+use regex::RegexBuilder;
 use std::borrow::Cow;
-use std::cmp::{max, min};
+use std::cmp::max;
+use std::cmp::min;
 use std::collections::HashSet;
 use std::env;
 use std::fmt;
-use std::fs::{self, read_to_string};
+use std::fs;
+use std::fs::read_to_string;
 use std::iter;
-use std::path::{Path, PathBuf};
-use std::process::{exit, Command};
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::exit;
+use std::process::Command;
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 
 mod terminal;
 
 use crate::terminal::Color;
-use rprompt::{prompt_reply_stderr, prompt_reply_stdout};
+use rprompt::prompt_reply_stderr;
+use rprompt::prompt_reply_stdout;
 
 type Result<T> = ::std::result::Result<T, Error>;
 
