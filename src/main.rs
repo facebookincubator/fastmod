@@ -14,6 +14,24 @@
  * limitations under the License.
  */
 
+use std::borrow::Cow;
+use std::cmp::max;
+use std::cmp::min;
+use std::collections::HashSet;
+use std::env;
+use std::fmt;
+use std::fs;
+use std::fs::read_to_string;
+use std::iter;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::exit;
+use std::process::Command;
+use std::sync::mpsc::channel;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::thread;
+
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Error;
@@ -33,29 +51,13 @@ use ignore::WalkBuilder;
 use ignore::WalkState;
 use regex::Regex;
 use regex::RegexBuilder;
-use std::borrow::Cow;
-use std::cmp::max;
-use std::cmp::min;
-use std::collections::HashSet;
-use std::env;
-use std::fmt;
-use std::fs;
-use std::fs::read_to_string;
-use std::iter;
-use std::path::Path;
-use std::path::PathBuf;
-use std::process::exit;
-use std::process::Command;
-use std::sync::mpsc::channel;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::thread;
 
 mod terminal;
 
-use crate::terminal::Color;
 use rprompt::prompt_reply_stderr;
 use rprompt::prompt_reply_stdout;
+
+use crate::terminal::Color;
 
 type Result<T> = ::std::result::Result<T, Error>;
 
@@ -920,11 +922,13 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use assert_cmd::Command;
     use std::fs::File;
     use std::io::Write;
+
+    use assert_cmd::Command;
     use tempdir::TempDir;
+
+    use super::*;
 
     #[test]
     fn test_index_to_row_col() {

@@ -14,11 +14,12 @@
  * limitations under the License.
  */
 
+use std::io;
+
 use crossterm::style::SetForegroundColor;
 use crossterm::terminal::Clear;
 use crossterm::terminal::ClearType;
 use crossterm::ExecutableCommand;
-use std::io;
 
 pub enum Color {
     Red,
