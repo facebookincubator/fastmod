@@ -93,7 +93,7 @@ directions above, you can install your build with `cargo install`.
 
 ## How `fastmod` works
 `fastmod` uses the
-[ignore](https://github.com/BurntSushi/ripgrep/tree/master/ignore)
+[ignore](https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore)
 crate to walk the given directory hierarchy using multiple threads in
 parallel while respecting `.gitignore`. It uses the
 [grep](https://github.com/BurntSushi/ripgrep/tree/master/crates/grep)
