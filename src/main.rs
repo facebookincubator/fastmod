@@ -32,6 +32,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 
+use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Error;
@@ -725,6 +726,45 @@ impl Fastmod {
     }
 }
 
+fn unescape(string: &str) -> Result<String> {
+    let mut result = String::with_capacity(string.len());
+    let mut characters = string.chars().enumerate();
+    while let Some((_, chr)) = characters.next() {
+        match chr {
+            '\\' => match characters.next() {
+                None => {
+                    return Err(anyhow!("No character following the backslash"));
+                }
+                Some((index, nextchr)) => {
+                    result.push(match nextchr {
+                        't' => '\t',  // 0x09
+                        'n' => '\n',  // 0x0a
+                        'r' => '\r',  // 0x0d
+                        ' ' => ' ',   // 0x20
+                        '"' => '"',   // 0x22
+                        '$' => '$',   // 0x24
+                        '\'' => '\'', // 0x27
+                        '\\' => '\\', // 0x5c
+                        '`' => '`',   // 0x60
+                        _ => {
+                            return Err(anyhow!(
+                                "Invalid escape sequence {}{} at index {} in '{}'",
+                                chr,
+                                nextchr,
+                                index,
+                                string
+                            ))
+                        }
+                    });
+                    continue;
+                }
+            },
+            _ => result.push(chr),
+        }
+    }
+    Ok(result)
+}
+
 fn fastmod() -> Result<()> {
     let matches = App::new("fastmod")
         .about("fastmod is a fast partial replacement for codemod.")
@@ -840,6 +880,21 @@ compatibility with the original codemod.",
                 .help("Treat REGEX as a literal string. Avoids the need to escape regex metacharacters (compare to ripgrep's option of the same name).")
         )
         .arg(
+            Arg::with_name("subst_escapes")
+                .long("subst-escapes")
+                .short("S")
+                .help("Treat some characters in substitution string escaped with a leading \\ as special:
+  '\\t' -> horizontal tab (TAB)
+  '\\n' -> new line or line feed (LF)
+  '\\r' -> carriage return (CR)
+  '\\ ' -> blank space
+  '\\\"' -> double quote
+  '\\$' -> dollar sign
+  \"\\'\" -> single quote
+  '\\\\' -> backslash
+  '\\`' -> grave accent or backtick")
+        )
+        .arg(
             Arg::with_name("match")
                 .value_name("REGEX")
                 .help("Regular expression to match.")
@@ -897,6 +952,13 @@ not what you want. Press Enter to continue anyway or Ctrl-C to quit.",
         .multi_line(true)
         .dot_matches_new_line(multiline)
         .build(&maybe_escaped_regex)?;
+    let subst_slice = matches.value_of("subst").expect("subst is required!");
+    let subst_string = if matches.is_present("subst_escapes") {
+        unescape(subst_slice).unwrap()
+    } else {
+        subst_slice.to_string()
+    };
+    let subst = subst_string.as_str();
 
     if accept_all {
         Fastmod::run_fast(
@@ -968,6 +1030,81 @@ mod tests {
             .success();
         let contents = read_to_string(dir.path().join("file1.c")).unwrap();
         assert_eq!(contents, "bar\nbar blah bar");
+    }
+
+    #[test]
+    fn test_simple_multiline_replace_all() {
+        let dir = create_test_files(&[
+            (
+                "file1.c",
+                "#ifndef SOME_HDR_GUARD\n#define SOME_HDR_GUARD\n\n\n#endif\n",
+            ),
+            (
+                "file2.c",
+                "#ifndef SOME_HDR_GUARD\r\n#define SOME_HDR_GUARD\r\n\r\n\r\n#endif\r\n",
+            ),
+        ]);
+        Command::cargo_bin("fastmod")
+            .unwrap()
+            .args(&[
+                "^(#\\s*??ifndef\\s+?)(\\w+?)((?:\\r?\\n)+)",
+                "#if 0${3}",
+                "--multiline",
+                "--accept-all",
+                "--dir",
+                dir.path().to_str().unwrap(),
+            ])
+            .assert()
+            .success();
+        let file1_contents = read_to_string(dir.path().join("file1.c")).unwrap();
+        assert_eq!(
+            file1_contents,
+            "#if 0\n#define SOME_HDR_GUARD\n\n\n#endif\n"
+        );
+
+        let file1_contents = read_to_string(dir.path().join("file2.c")).unwrap();
+        assert_eq!(
+            file1_contents,
+            "#if 0\r\n#define SOME_HDR_GUARD\r\n\r\n\r\n#endif\r\n"
+        );
+    }
+
+    #[test]
+    fn test_simple_replace_all_with_subst_escapes() {
+        let dir = create_test_files(&[
+            (
+                "file1.c",
+                "#ifndef SOME_HDR_GUARD\n#define SOME_HDR_GUARD\n\n\n#endif\n",
+            ),
+            (
+                "file2.c",
+                "#ifndef SOME_HDR_GUARD\r\n#define SOME_HDR_GUARD\r\n\r\n\r\n#endif\r\n",
+            ),
+        ]);
+        Command::cargo_bin("fastmod")
+            .unwrap()
+            .args(&[
+                "^#\\s*??ifndef\\s+?\\w+?(?:\\r?\\n)+",
+                "#if 0\\t // \\$ \\\\ \\\" \\' \\r\\n",
+                "--accept-all",
+                "--multiline",
+                "--subst-escapes",
+                "--dir",
+                dir.path().to_str().unwrap(),
+            ])
+            .assert()
+            .success();
+        let file1_contents = read_to_string(dir.path().join("file1.c")).unwrap();
+        assert_eq!(
+            file1_contents,
+            "#if 0\t // $ \\ \" ' \r\n#define SOME_HDR_GUARD\n\n\n#endif\n"
+        );
+
+        let file1_contents = read_to_string(dir.path().join("file2.c")).unwrap();
+        assert_eq!(
+            file1_contents,
+            "#if 0\t // $ \\ \" ' \r\n#define SOME_HDR_GUARD\r\n\r\n\r\n#endif\r\n"
+        );
     }
 
     #[test]
@@ -1193,5 +1330,11 @@ mod tests {
         let file_path = dir.path().join("foo.txt");
         let new_contents = read_to_string(file_path).unwrap();
         assert_eq!(new_contents, "$foo.bar");
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_unescape_invalid_escape_sequences() {
+        unescape("\\a\\b\\c\\d\\e\\f\\,\\:").unwrap();
     }
 }
