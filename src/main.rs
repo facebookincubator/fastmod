@@ -873,10 +873,11 @@ compatibility with the original codemod.",
     let hidden = matches.is_present("hidden");
     let print_changed_files = matches.is_present("print_changed_files");
     let regex_str = matches.value_of("match").expect("match is required!");
-    let maybe_escaped_regex = if matches.is_present("fixed_strings") {
-        regex::escape(regex_str)
+    let subst = matches.value_of("subst").expect("subst is required!");
+    let (maybe_escaped_regex, subst) = if matches.is_present("fixed_strings") {
+        (regex::escape(regex_str), subst.replace("$", "$$"))
     } else {
-        regex_str.to_string()
+        (regex_str.to_string(), subst.to_string())
     };
     let regex = RegexBuilder::new(&maybe_escaped_regex)
         .case_insensitive(ignore_case)
@@ -896,13 +897,12 @@ not what you want. Press Enter to continue anyway or Ctrl-C to quit.",
         .multi_line(true)
         .dot_matches_new_line(multiline)
         .build(&maybe_escaped_regex)?;
-    let subst = matches.value_of("subst").expect("subst is required!");
 
     if accept_all {
         Fastmod::run_fast(
             &regex,
             &matcher,
-            subst,
+            &subst,
             dirs,
             file_set,
             hidden,
@@ -910,7 +910,7 @@ not what you want. Press Enter to continue anyway or Ctrl-C to quit.",
         )
     } else {
         Fastmod::new(accept_all, hidden, print_changed_files)
-            .run_interactive(&regex, &matcher, subst, dirs, file_set)
+            .run_interactive(&regex, &matcher, &subst, dirs, file_set)
     }
 }
 
