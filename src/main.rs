@@ -926,7 +926,7 @@ mod tests {
     use std::io::Write;
 
     use assert_cmd::Command;
-    use tempdir::TempDir;
+    use tempfile::TempDir;
 
     use super::*;
 
@@ -942,7 +942,7 @@ mod tests {
     fn create_test_files<'a>(
         names_and_contents: impl IntoIterator<Item = &'a (&'a str, &'a str)>,
     ) -> TempDir {
-        let dir = TempDir::new("fastmodtest").unwrap();
+        let dir = TempDir::with_prefix("fastmodtest.").unwrap();
         for (name, contents) in names_and_contents {
             let path = dir.path().join(name);
             let mut file = File::create(path.clone()).unwrap();
@@ -1048,7 +1048,7 @@ mod tests {
 
     #[test]
     fn test_print_changed_files() {
-        let dir = TempDir::new("fastmodtest").unwrap();
+        let dir = TempDir::with_prefix("fastmodtest.").unwrap();
         let mut expected_changed_files = Vec::new();
         for file_num in 1..6 {
             let path = dir.path().join(format!("file{}.c", file_num));
