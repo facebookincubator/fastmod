@@ -1,6 +1,6 @@
 [package]
 name = "fastmod"
-version = "0.4.3"
+version = "0.4.4"
 authors = ["Scott Wolchok <swolchok@fb.com>"]
 description = "Fast, partial replacement for codemod (find/replace tool for programmers)"
 edition = "2018"
