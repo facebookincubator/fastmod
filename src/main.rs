@@ -1173,4 +1173,25 @@ mod tests {
             .assert()
             .success();
     }
+
+    #[test]
+    fn test_dollar_sign_in_replacement_string_with_fixed_strings() {
+        let contents = "something";
+        let dir = create_test_files(&[("foo.txt", contents)]);
+        Command::cargo_bin("fastmod")
+            .unwrap()
+            .args(&[
+                "-F",
+                "something",
+                "$foo.bar",
+                "--dir",
+                dir.path().to_str().unwrap(),
+            ])
+            .write_stdin("y\n")
+            .assert()
+            .success();
+        let file_path = dir.path().join("foo.txt");
+        let new_contents = read_to_string(file_path).unwrap();
+        assert_eq!(new_contents, "$foo.bar");
+    }
 }
