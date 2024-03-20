@@ -23,5 +23,5 @@ regex = "1.5.5"
 rprompt = "1.0.3"
 
 [dev-dependencies]
-assert_cmd = "1"
+assert_cmd = "2"
 tempfile = "3.8.0"
