@@ -20,7 +20,7 @@ grep = "0.2.5"
 ignore = "0.4.1"
 num_cpus = "1.8.0"
 regex = "1.5.5"
-rprompt = "1.0.3"
+rprompt = "2.1.1"
 
 [dev-dependencies]
 assert_cmd = "2"
