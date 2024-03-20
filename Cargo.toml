@@ -13,7 +13,7 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0"
-clap = "2.31.2"
+clap = { version = "4", features = ["derive", "wrap_help"] }
 crossterm = "0.27"
 diff = "0.1.11"
 grep = "0.2.5"
