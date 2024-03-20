@@ -35,9 +35,7 @@ use std::thread;
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Error;
-use clap::crate_version;
-use clap::App;
-use clap::Arg;
+use clap::Parser;
 use diff::Result as DiffResult;
 use grep::regex::RegexMatcher;
 use grep::regex::RegexMatcherBuilder;
@@ -54,40 +52,18 @@ use regex::RegexBuilder;
 
 mod terminal;
 
-use rprompt::prompt_reply_stderr;
-use rprompt::prompt_reply_stdout;
+use rprompt::prompt_reply_from_bufread;
 
 use crate::terminal::Color;
 
 type Result<T> = ::std::result::Result<T, Error>;
 
-#[derive(Clone)]
 enum FileSet {
     Extensions(Vec<String>),
     Glob {
         matches: Vec<String>,
         case_insensitive: bool,
     },
-}
-
-fn get_file_set(matches: &clap::ArgMatches) -> Option<FileSet> {
-    if let Some(files) = matches.values_of_lossy("extensions") {
-        return Some(FileSet::Extensions(files));
-    }
-    if let Some(files) = matches.values_of_lossy("glob") {
-        return Some(FileSet::Glob {
-            matches: files,
-            case_insensitive: false,
-        });
-    }
-    if let Some(files) = matches.values_of_lossy("iglob") {
-        return Some(FileSet::Glob {
-            matches: files,
-            case_insensitive: true,
-        });
-    }
-
-    None
 }
 
 fn notify_fast_mode() {
@@ -126,20 +102,29 @@ fn looks_like_code(path: &Path) -> bool {
 
 fn prompt(prompt_text: &str, letters: &str, default: Option<char>) -> Result<char> {
     loop {
-        let input = prompt_reply_stdout(prompt_text).context("Unable to read user input")?;
-        if input.is_empty() && default.is_some() {
-            return Ok(default.unwrap());
+        let input = prompt_reply_from_bufread(
+            &mut std::io::stdin().lock(),
+            &mut std::io::stdout(),
+            prompt_text,
+        )
+        .context("Unable to read user input")?;
+
+        match (input.as_ref(), default) {
+            ("", Some(default)) => return Ok(default),
+            (input, _) if input.len() == 1 && letters.contains(input) => {
+                return Ok(input.chars().next().unwrap())
+            }
+            _ => println!("Come again?"),
         }
-        if input.len() == 1 && letters.contains(&input) {
-            return Ok(input.chars().next().unwrap());
-        }
-        println!("Come again?")
     }
 }
 
-fn walk_builder_with_file_set(dirs: Vec<&str>, file_set: Option<FileSet>) -> Result<WalkBuilder> {
+fn walk_builder_with_file_set<P>(dirs: &[P], file_set: &Option<FileSet>) -> Result<WalkBuilder>
+where
+    P: AsRef<Path>,
+{
     ensure!(!dirs.is_empty(), "must provide at least one path to walk!");
-    let mut builder = WalkBuilder::new(dirs[0]);
+    let mut builder = WalkBuilder::new(&dirs[0]);
     for dir in &dirs[1..] {
         builder.add(dir);
     }
@@ -165,14 +150,14 @@ fn walk_builder_with_file_set(dirs: Vec<&str>, file_set: Option<FileSet>) -> Res
             } => {
                 let mut override_builder = OverrideBuilder::new(".");
                 // Case sensitivity needs to be added before the patterns are.
-                if case_insensitive {
+                if *case_insensitive {
                     override_builder
                         .case_insensitive(true)
                         .context("Unable to toggle case sensitivity")?;
                 }
                 for file in matches {
                     override_builder
-                        .add(&file)
+                        .add(file)
                         .context("Unable to register glob with directory walker")?;
                 }
                 builder.overrides(
@@ -218,11 +203,11 @@ fn file_contents_if_matches(
     path: &Path,
 ) -> Option<String> {
     let mut sink = FastmodSink::new();
-    if let Err(e) = searcher.search_path(&matcher, path, &mut sink) {
+    if let Err(e) = searcher.search_path(matcher, path, &mut sink) {
         eprintln!("{}", display_warning(&e.into()));
     };
     if sink.did_match {
-        match read_to_string(&path) {
+        match read_to_string(path) {
             Ok(c) => Some(c),
             Err(e) => {
                 eprintln!("{}", display_warning(&e.into()));
@@ -475,19 +460,16 @@ impl Fastmod {
 
     fn diffs_to_print<'a>(&self, orig: &'a str, edit: &'a str) -> Vec<DiffResult<&'a str>> {
         let mut diffs = diff::lines(orig, edit);
-        fn is_same(x: &DiffResult<&str>) -> bool {
-            match x {
-                DiffResult::Both(..) => true,
-                _ => false,
-            }
+        fn is_same(x: &&DiffResult<&str>) -> bool {
+            matches!(x, DiffResult::Both(..))
         }
         let lines_to_print = match terminal::size() {
             Some((_w, h)) => h,
             None => 25,
         } - 20;
 
-        let num_prefix_lines = diffs.iter().take_while(|diff| is_same(diff)).count();
-        let num_suffix_lines = diffs.iter().rev().take_while(|diff| is_same(diff)).count();
+        let num_prefix_lines = diffs.iter().take_while(is_same).count();
+        let num_suffix_lines = diffs.iter().rev().take_while(is_same).count();
 
         // If the prefix is the length of the diff then the file matched <regex>
         // but applying <subst> didn't result in any changes, there are no diffs
@@ -521,7 +503,7 @@ impl Fastmod {
         diffs
     }
 
-    fn print_diff<'a>(&mut self, diffs: &[DiffResult<&'a str>]) {
+    fn print_diff(&mut self, diffs: &[DiffResult<&str>]) {
         for diff in diffs {
             match diff {
                 DiffResult::Left(l) => {
@@ -539,15 +521,18 @@ impl Fastmod {
         }
     }
 
-    fn run_interactive(
+    fn run_interactive<P>(
         &mut self,
         regex: &Regex,
         matcher: &RegexMatcher,
         subst: &str,
-        dirs: Vec<&str>,
-        file_set: Option<FileSet>,
-    ) -> Result<()> {
-        let walk = walk_builder_with_file_set(dirs.clone(), file_set.clone())?
+        dirs: &[P],
+        file_set: &Option<FileSet>,
+    ) -> Result<()>
+    where
+        P: AsRef<Path>,
+    {
+        let walk = walk_builder_with_file_set(dirs, file_set)?
             .hidden(!self.hidden)
             .threads(min(12, num_cpus::get()))
             .build_parallel();
@@ -598,7 +583,7 @@ impl Fastmod {
         let mut visited = HashSet::default();
         while let Ok((path, contents)) = rx.recv() {
             visited.insert(path.clone());
-            self.present_and_apply_patches(&regex, subst, &path, contents)?;
+            self.present_and_apply_patches(regex, subst, &path, contents)?;
             if self.yes_to_all {
                 // Kick over into fast mode. We restart the
                 // search, but we have our visited set so that
@@ -607,8 +592,8 @@ impl Fastmod {
                 terminal::clear();
                 notify_fast_mode();
                 return Fastmod::run_fast_impl(
-                    &regex,
-                    &matcher,
+                    regex,
+                    matcher,
                     subst,
                     dirs,
                     file_set,
@@ -622,15 +607,18 @@ impl Fastmod {
         Ok(())
     }
 
-    fn run_fast(
+    fn run_fast<P>(
         regex: &Regex,
         matcher: &RegexMatcher,
         subst: &str,
-        dirs: Vec<&str>,
-        file_set: Option<FileSet>,
+        dirs: &[P],
+        file_set: &Option<FileSet>,
         hidden: bool,
         print_changed_files: bool,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        P: AsRef<Path>,
+    {
         Fastmod::run_fast_impl(
             regex,
             matcher,
@@ -647,16 +635,19 @@ impl Fastmod {
         )
     }
 
-    fn run_fast_impl(
+    fn run_fast_impl<P>(
         regex: &Regex,
         matcher: &RegexMatcher,
         subst: &str,
-        dirs: Vec<&str>,
-        file_set: Option<FileSet>,
+        dirs: &[P],
+        file_set: &Option<FileSet>,
         hidden: bool,
         changed_files: Option<Vec<PathBuf>>,
         visited: Option<HashSet<PathBuf>>,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        P: AsRef<Path>,
+    {
         let walk = walk_builder_with_file_set(dirs, file_set)?
             .hidden(!hidden)
             .threads(min(12, num_cpus::get()))
@@ -664,7 +655,7 @@ impl Fastmod {
         let matcher = matcher.clone();
         let visited = Arc::new(visited);
         let should_record_changed_files = changed_files.is_some();
-        let changed_files = Arc::new(Mutex::new(changed_files.unwrap_or_else(Vec::new)));
+        let changed_files = Arc::new(Mutex::new(changed_files.unwrap_or_default()));
         let changed_files_inner = changed_files.clone();
         walk.run(move || {
             // We have to do our own changed file tracking, so don't
@@ -725,192 +716,175 @@ impl Fastmod {
     }
 }
 
+/// fastmod is a tool to assist you with large-scale codebase refactors
+/// that can be partially automated but still require human oversight and occasional
+/// intervention.
+///
+/// Example: Let's say you're deprecating your use of the <font> tag. From the
+/// command line, you might make progress by running:
+///
+///   fastmod -m -d www --extensions php,html \\
+///       '<font *color=\"?(.*?)\"?>(.*?)</font>' \\
+///       '<span style=\"color: ${1};\">${2}</span>'
+///
+/// For each match of the regex, you'll be shown a colored diff and asked if you
+/// want to accept the change, reject it, or edit the line in question in your
+/// $EDITOR of choice.
+///
+/// NOTE: Whereas codemod uses Python regexes, fastmod uses the Rust regex
+/// crate, which supports a slightly different regex syntax and does not
+/// support look around or backreferences. In particular, use ${1} instead
+/// of \\1 to get the contents of the first capture group, and use $$ to
+/// write a literal $ in the replacement string. See
+/// https://docs.rs/regex#syntax for details.
+///
+/// A consequence of this syntax is that the use of single quotes instead
+/// of double quotes around the replacment text is important, because the
+/// bash shell itself cares about the $ character in double-quoted
+/// strings. If you must double-quote your input text, be careful to
+/// escape $ characters properly!
+#[derive(Parser, Debug)]
+#[command(
+    version,
+    about = "fastmod is a fast partial replacement for codemod.",
+    verbatim_doc_comment
+)]
+struct Args {
+    /// Automatically accept all changes (use with caution).
+    #[arg(long)]
+    accept_all: bool,
+
+    /// Search hidden files.
+    #[arg(long)]
+    hidden: bool,
+
+    /// Treat REGEX as a literal string. Avoids the need to escape regex metacharacters
+    /// (compare to ripgrep's option of the same name).
+    #[arg(short = 'F', long)]
+    fixed_strings: bool,
+
+    /// Perform case-insensitive search.
+    #[arg(short, long)]
+    ignore_case: bool,
+
+    /// Have regex work over multiple lines (i.e., have dot match newlines).
+    #[arg(short, long)]
+    multiline: bool,
+
+    /// Print the paths of changed files. (Recommended to be combined with --accept-all.)
+    #[arg(long)]
+    print_changed_files: bool,
+
+    /// The path whose descendent files are to be explored.
+    /// Included as a flag instead of a positional argument for
+    /// compatibility with the original codemod.
+    #[arg(
+        short,
+        long,
+        help = "The path whose descendent files are to be explored."
+    )]
+    dir: Vec<PathBuf>,
+
+    /// A comma-delimited list of file extensions to process.
+    #[arg(short, long, value_name = "EXTENSION", value_delimiter = ',', conflicts_with_all = ["glob", "iglob"])]
+    extensions: Vec<String>,
+
+    /// A space-delimited list of globs to process.
+    #[arg(short, long, conflicts_with = "iglob")]
+    glob: Vec<String>,
+
+    /// A space-delimited list of case-insensitive globs to process.
+    #[arg(long)]
+    iglob: Vec<String>,
+
+    /// Regular expression to match.
+    #[arg(value_name = "REGEX")]
+    r#match: String,
+
+    /// Substitution to replace with.
+    #[arg()]
+    // TODO: support empty substitution to mean "open my
+    // editor at instances of this regex"?
+    subst: String,
+
+    /// Paths whose descendent files are to be explored.
+    #[arg(value_name = "FILE OR DIR")]
+    file_or_dir: Vec<PathBuf>,
+}
+
 fn fastmod() -> Result<()> {
-    let matches = App::new("fastmod")
-        .about("fastmod is a fast partial replacement for codemod.")
-        .version(crate_version!())
-        .long_about(
-            "fastmod is a tool to assist you with large-scale codebase refactors
-that can be partially automated but still require human oversight and occasional
-intervention.
+    let args = Args::parse();
 
-Example: Let's say you're deprecating your use of the <font> tag. From the
-command line, you might make progress by running:
-
-  fastmod -m -d www --extensions php,html \\
-      '<font *color=\"?(.*?)\"?>(.*?)</font>' \\
-      '<span style=\"color: ${1};\">${2}</span>'
-
-For each match of the regex, you'll be shown a colored diff and asked if you
-want to accept the change, reject it, or edit the line in question in your
-$EDITOR of choice.
-
-NOTE: Whereas codemod uses Python regexes, fastmod uses the Rust regex
-crate, which supports a slightly different regex syntax and does not
-support look around or backreferences. In particular, use ${1} instead
-of \\1 to get the contents of the first capture group, and use $$ to
-write a literal $ in the replacement string. See
-https://docs.rs/regex#syntax for details.
-
-A consequence of this syntax is that the use of single quotes instead
-of double quotes around the replacment text is important, because the
-bash shell itself cares about the $ character in double-quoted
-strings. If you must double-quote your input text, be careful to
-escape $ characters properly!",
-        )
-        .arg(
-            Arg::with_name("multiline")
-                .short("m")
-                .long("multiline")
-                .help("Have regex work over multiple lines (i.e., have dot match newlines)."),
-        )
-        .arg(
-            Arg::with_name("dir")
-                .short("d")
-                .long("dir")
-                .value_name("DIR")
-                .help("The path whose descendent files are to be explored.")
-                .long_help(
-                    "The path whose descendent files are to be explored.
-Included as a flag instead of a positional argument for
-compatibility with the original codemod.",
-                )
-                .multiple(true)
-                .number_of_values(1),
-        )
-        .arg(
-            Arg::with_name("file_or_dir")
-                .value_name("FILE OR DIR")
-                .help("Paths whose descendent files are to be explored.")
-                .multiple(true)
-                .index(3),
-        )
-        .arg(
-            Arg::with_name("ignore_case")
-                .short("i")
-                .long("ignore-case")
-                .help("Perform case-insensitive search."),
-        )
-        .arg(
-            Arg::with_name("extensions")
-                .short("e")
-                .long("extensions")
-                .value_name("EXTENSION")
-                .multiple(true)
-                .require_delimiter(true)
-                .conflicts_with_all(&["glob", "iglob"])
-                // TODO: support Unix pattern-matching of extensions?
-                .help("A comma-delimited list of file extensions to process."),
-        )
-        .arg(
-            Arg::with_name("glob")
-            .short("g")
-            .long("glob")
-            .value_name("GLOB")
-            .multiple(true)
-            .conflicts_with("iglob")
-            .help("A space-delimited list of globs to process.")
-        )
-        .arg(
-            Arg::with_name("hidden")
-                .long("hidden")
-                .help("Search hidden files.")
-        )
-        .arg(
-            Arg::with_name("iglob")
-            .long("iglob")
-            .value_name("IGLOB")
-            .multiple(true)
-            .help("A space-delimited list of case-insensitive globs to process.")
-        )
-        .arg(
-            Arg::with_name("accept_all")
-                .long("accept-all")
-                .help("Automatically accept all changes (use with caution)."),
-        )
-        .arg(
-            Arg::with_name("print_changed_files")
-                .long("print-changed-files")
-                .help("Print the paths of changed files. (Recommended to be combined with --accept-all.)"),
-        )
-        .arg(
-            Arg::with_name("fixed_strings")
-                .long("fixed-strings")
-                .short("F")
-                .help("Treat REGEX as a literal string. Avoids the need to escape regex metacharacters (compare to ripgrep's option of the same name).")
-        )
-        .arg(
-            Arg::with_name("match")
-                .value_name("REGEX")
-                .help("Regular expression to match.")
-                .required(true)
-                .index(1),
-        )
-        .arg(
-            Arg::with_name("subst")
-             // TODO: support empty substitution to mean "open my
-             // editor at instances of this regex"?
-             .required(true)
-             .help("Substitution to replace with.")
-             .index(2),
-        )
-        .get_matches();
-    let multiline = matches.is_present("multiline");
     let dirs = {
-        let mut dirs: Vec<_> = matches
-            .values_of("dir")
-            .unwrap_or_default()
-            .chain(matches.values_of("file_or_dir").unwrap_or_default())
-            .collect();
+        let mut dirs: Vec<_> = args.dir.into_iter().chain(args.file_or_dir).collect();
         if dirs.is_empty() {
-            dirs.push(".");
+            dirs.push(PathBuf::from("."));
         }
         dirs
     };
-    let ignore_case = matches.is_present("ignore_case");
-    let file_set = get_file_set(&matches);
-    let accept_all = matches.is_present("accept_all");
-    let hidden = matches.is_present("hidden");
-    let print_changed_files = matches.is_present("print_changed_files");
-    let regex_str = matches.value_of("match").expect("match is required!");
-    let subst = matches.value_of("subst").expect("subst is required!");
-    let (maybe_escaped_regex, subst) = if matches.is_present("fixed_strings") {
-        (regex::escape(regex_str), subst.replace("$", "$$"))
-    } else {
-        (regex_str.to_string(), subst.to_string())
+
+    let file_set = {
+        if !args.extensions.is_empty() {
+            Some(FileSet::Extensions(args.extensions))
+        } else if !args.glob.is_empty() {
+            Some(FileSet::Glob {
+                matches: args.glob,
+                case_insensitive: false,
+            })
+        } else if !args.iglob.is_empty() {
+            Some(FileSet::Glob {
+                matches: args.iglob,
+                case_insensitive: true,
+            })
+        } else {
+            None
+        }
     };
+
+    let (maybe_escaped_regex, subst) = if args.fixed_strings {
+        (regex::escape(&args.r#match), args.subst.replace('$', "$$"))
+    } else {
+        (args.r#match, args.subst)
+    };
+
     let regex = RegexBuilder::new(&maybe_escaped_regex)
-        .case_insensitive(ignore_case)
+        .case_insensitive(args.ignore_case)
         .multi_line(true) // match codemod behavior for ^ and $.
-        .dot_matches_new_line(multiline)
+        .dot_matches_new_line(args.multiline)
         .build()
-        .with_context(|| format!("Unable to make regex from {}", regex_str))?;
+        .with_context(|| format!("Unable to make regex from {}", maybe_escaped_regex))?;
+
     if regex.is_match("") {
-        let _ = prompt_reply_stderr(&format!(
-            "Warning: your regex {:?} matches the empty string. This is probably
-not what you want. Press Enter to continue anyway or Ctrl-C to quit.",
-            regex,
-        ))?;
+        let _ = prompt_reply_from_bufread(
+            &mut std::io::stdin().lock(),
+            &mut std::io::stderr(),
+            &format!(
+                "Warning: your regex {:?} matches the empty string. This is probably
+    not what you want. Press Enter to continue anyway or Ctrl-C to quit.",
+                regex,
+            ),
+        )?;
     }
+
     let matcher = RegexMatcherBuilder::new()
-        .case_insensitive(ignore_case)
+        .case_insensitive(args.ignore_case)
         .multi_line(true)
-        .dot_matches_new_line(multiline)
+        .dot_matches_new_line(args.multiline)
         .build(&maybe_escaped_regex)?;
 
-    if accept_all {
+    if args.accept_all {
         Fastmod::run_fast(
             &regex,
             &matcher,
             &subst,
-            dirs,
-            file_set,
-            hidden,
-            print_changed_files,
+            &dirs,
+            &file_set,
+            args.hidden,
+            args.print_changed_files,
         )
     } else {
-        Fastmod::new(accept_all, hidden, print_changed_files)
-            .run_interactive(&regex, &matcher, &subst, dirs, file_set)
+        Fastmod::new(args.accept_all, args.hidden, args.print_changed_files)
+            .run_interactive(&regex, &matcher, &subst, &dirs, &file_set)
     }
 }
 
@@ -957,7 +931,7 @@ mod tests {
         let dir = create_test_files(&[("file1.c", "foo\nfoo blah foo")]);
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&[
+            .args([
                 "foo",
                 "bar",
                 "--accept-all",
@@ -980,7 +954,7 @@ mod tests {
 
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&[
+            .args([
                 "awesome",
                 "great",
                 "--accept-all",
@@ -1009,7 +983,7 @@ mod tests {
         let file_path = dir.path().join("file1.txt");
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&[
+            .args([
                 "foo+bar",
                 "baz",
                 "--accept-all",
@@ -1066,7 +1040,7 @@ mod tests {
         }
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&[
+            .args([
                 "foo",
                 "baz",
                 "--accept-all",
@@ -1119,7 +1093,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", "foo")]);
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&["foo", "baz", "--dir", dir.path().to_str().unwrap()])
+            .args(["foo", "baz", "--dir", dir.path().to_str().unwrap()])
             .write_stdin("n\n")
             .assert()
             .success();
@@ -1163,7 +1137,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", contents)]);
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&[
+            .args([
                 "quotes",
                 "characters",
                 "--dir",
@@ -1180,7 +1154,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", contents)]);
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&[
+            .args([
                 "-F",
                 "something",
                 "$foo.bar",

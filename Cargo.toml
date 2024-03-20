@@ -13,15 +13,15 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0"
-clap = "2.31.2"
-crossterm = "0.24"
+clap = { version = "4", features = ["derive", "wrap_help"] }
+crossterm = "0.27"
 diff = "0.1.11"
-grep = "0.2.5"
+grep = "0.3.1"
 ignore = "0.4.1"
 num_cpus = "1.8.0"
 regex = "1.5.5"
-rprompt = "1.0.3"
+rprompt = "2.1.1"
 
 [dev-dependencies]
-assert_cmd = "1"
+assert_cmd = "2"
 tempfile = "3.8.0"
