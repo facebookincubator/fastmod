@@ -1,0 +1,2 @@
+# https://rust-lang.github.io/rust-clippy/master/index.html#/too_many_arguments
+too-many-arguments-threshold = 8

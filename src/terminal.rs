@@ -21,6 +21,7 @@ use crossterm::terminal::Clear;
 use crossterm::terminal::ClearType;
 use crossterm::ExecutableCommand;
 
+#[derive(Clone, Copy)]
 pub enum Color {
     Red,
     Green,

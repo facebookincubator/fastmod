@@ -108,13 +108,14 @@ fn prompt(prompt_text: &str, letters: &str, default: Option<char>) -> Result<cha
             prompt_text,
         )
         .context("Unable to read user input")?;
-        if input.is_empty() && default.is_some() {
-            return Ok(default.unwrap());
+
+        match (input.as_ref(), default) {
+            ("", Some(default)) => return Ok(default),
+            (input, _) if input.len() == 1 && letters.contains(input) => {
+                return Ok(input.chars().next().unwrap())
+            }
+            _ => println!("Come again?"),
         }
-        if input.len() == 1 && letters.contains(&input) {
-            return Ok(input.chars().next().unwrap());
-        }
-        println!("Come again?")
     }
 }
 
@@ -202,11 +203,11 @@ fn file_contents_if_matches(
     path: &Path,
 ) -> Option<String> {
     let mut sink = FastmodSink::new();
-    if let Err(e) = searcher.search_path(&matcher, path, &mut sink) {
+    if let Err(e) = searcher.search_path(matcher, path, &mut sink) {
         eprintln!("{}", display_warning(&e.into()));
     };
     if sink.did_match {
-        match read_to_string(&path) {
+        match read_to_string(path) {
             Ok(c) => Some(c),
             Err(e) => {
                 eprintln!("{}", display_warning(&e.into()));
@@ -459,19 +460,16 @@ impl Fastmod {
 
     fn diffs_to_print<'a>(&self, orig: &'a str, edit: &'a str) -> Vec<DiffResult<&'a str>> {
         let mut diffs = diff::lines(orig, edit);
-        fn is_same(x: &DiffResult<&str>) -> bool {
-            match x {
-                DiffResult::Both(..) => true,
-                _ => false,
-            }
+        fn is_same(x: &&DiffResult<&str>) -> bool {
+            matches!(x, DiffResult::Both(..))
         }
         let lines_to_print = match terminal::size() {
             Some((_w, h)) => h,
             None => 25,
         } - 20;
 
-        let num_prefix_lines = diffs.iter().take_while(|diff| is_same(diff)).count();
-        let num_suffix_lines = diffs.iter().rev().take_while(|diff| is_same(diff)).count();
+        let num_prefix_lines = diffs.iter().take_while(is_same).count();
+        let num_suffix_lines = diffs.iter().rev().take_while(is_same).count();
 
         // If the prefix is the length of the diff then the file matched <regex>
         // but applying <subst> didn't result in any changes, there are no diffs
@@ -505,7 +503,7 @@ impl Fastmod {
         diffs
     }
 
-    fn print_diff<'a>(&mut self, diffs: &[DiffResult<&'a str>]) {
+    fn print_diff(&mut self, diffs: &[DiffResult<&str>]) {
         for diff in diffs {
             match diff {
                 DiffResult::Left(l) => {
@@ -585,7 +583,7 @@ impl Fastmod {
         let mut visited = HashSet::default();
         while let Ok((path, contents)) = rx.recv() {
             visited.insert(path.clone());
-            self.present_and_apply_patches(&regex, subst, &path, contents)?;
+            self.present_and_apply_patches(regex, subst, &path, contents)?;
             if self.yes_to_all {
                 // Kick over into fast mode. We restart the
                 // search, but we have our visited set so that
@@ -594,8 +592,8 @@ impl Fastmod {
                 terminal::clear();
                 notify_fast_mode();
                 return Fastmod::run_fast_impl(
-                    &regex,
-                    &matcher,
+                    regex,
+                    matcher,
                     subst,
                     dirs,
                     file_set,
@@ -657,7 +655,7 @@ impl Fastmod {
         let matcher = matcher.clone();
         let visited = Arc::new(visited);
         let should_record_changed_files = changed_files.is_some();
-        let changed_files = Arc::new(Mutex::new(changed_files.unwrap_or_else(Vec::new)));
+        let changed_files = Arc::new(Mutex::new(changed_files.unwrap_or_default()));
         let changed_files_inner = changed_files.clone();
         walk.run(move || {
             // We have to do our own changed file tracking, so don't
@@ -844,7 +842,7 @@ fn fastmod() -> Result<()> {
     };
 
     let (maybe_escaped_regex, subst) = if args.fixed_strings {
-        (regex::escape(&args.r#match), args.subst.replace("$", "$$"))
+        (regex::escape(&args.r#match), args.subst.replace('$', "$$"))
     } else {
         (args.r#match, args.subst)
     };
@@ -933,7 +931,7 @@ mod tests {
         let dir = create_test_files(&[("file1.c", "foo\nfoo blah foo")]);
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&[
+            .args([
                 "foo",
                 "bar",
                 "--accept-all",
@@ -956,7 +954,7 @@ mod tests {
 
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&[
+            .args([
                 "awesome",
                 "great",
                 "--accept-all",
@@ -985,7 +983,7 @@ mod tests {
         let file_path = dir.path().join("file1.txt");
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&[
+            .args([
                 "foo+bar",
                 "baz",
                 "--accept-all",
@@ -1042,7 +1040,7 @@ mod tests {
         }
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&[
+            .args([
                 "foo",
                 "baz",
                 "--accept-all",
@@ -1095,7 +1093,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", "foo")]);
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&["foo", "baz", "--dir", dir.path().to_str().unwrap()])
+            .args(["foo", "baz", "--dir", dir.path().to_str().unwrap()])
             .write_stdin("n\n")
             .assert()
             .success();
@@ -1139,7 +1137,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", contents)]);
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&[
+            .args([
                 "quotes",
                 "characters",
                 "--dir",
@@ -1156,7 +1154,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", contents)]);
         Command::cargo_bin("fastmod")
             .unwrap()
-            .args(&[
+            .args([
                 "-F",
                 "something",
                 "$foo.bar",
