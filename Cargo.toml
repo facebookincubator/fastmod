@@ -16,7 +16,7 @@ anyhow = "1.0"
 clap = { version = "4", features = ["derive", "wrap_help"] }
 crossterm = "0.27"
 diff = "0.1.11"
-grep = "0.2.5"
+grep = "0.3.1"
 ignore = "0.4.1"
 num_cpus = "1.8.0"
 regex = "1.5.5"
