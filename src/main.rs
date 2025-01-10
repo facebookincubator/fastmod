@@ -259,6 +259,7 @@ impl FastmodSink {
 struct Fastmod {
     yes_to_all: bool,
     hidden: bool,
+    no_ignore: bool,
     changed_files: Option<Vec<PathBuf>>,
 }
 
@@ -296,10 +297,11 @@ fn backward_to_char_boundary(s: &str, mut index: usize) -> usize {
 }
 
 impl Fastmod {
-    fn new(accept_all: bool, hidden: bool, print_changed_files: bool) -> Fastmod {
+    fn new(accept_all: bool, hidden: bool, no_ignore: bool, print_changed_files: bool) -> Fastmod {
         Fastmod {
             yes_to_all: accept_all,
             hidden,
+            no_ignore,
             changed_files: if print_changed_files {
                 Some(Vec::new())
             } else {
@@ -549,6 +551,11 @@ impl Fastmod {
     ) -> Result<()> {
         let walk = walk_builder_with_file_set(dirs.clone(), file_set.clone())?
             .hidden(!self.hidden)
+            .parents(!self.no_ignore)
+            .ignore(!self.no_ignore)
+            .git_ignore(!self.no_ignore)
+            .git_global(!self.no_ignore)
+            .git_exclude(!self.no_ignore)
             .threads(min(12, num_cpus::get()))
             .build_parallel();
         let (tx, rx) = channel();
@@ -613,6 +620,7 @@ impl Fastmod {
                     dirs,
                     file_set,
                     self.hidden,
+                    self.no_ignore,
                     self.changed_files.clone(),
                     Some(visited),
                 );
@@ -629,6 +637,7 @@ impl Fastmod {
         dirs: Vec<&str>,
         file_set: Option<FileSet>,
         hidden: bool,
+        no_ignore: bool,
         print_changed_files: bool,
     ) -> Result<()> {
         Fastmod::run_fast_impl(
@@ -638,6 +647,7 @@ impl Fastmod {
             dirs,
             file_set,
             hidden,
+            no_ignore,
             if print_changed_files {
                 Some(Vec::new())
             } else {
@@ -654,11 +664,17 @@ impl Fastmod {
         dirs: Vec<&str>,
         file_set: Option<FileSet>,
         hidden: bool,
+        no_ignore: bool,
         changed_files: Option<Vec<PathBuf>>,
         visited: Option<HashSet<PathBuf>>,
     ) -> Result<()> {
         let walk = walk_builder_with_file_set(dirs, file_set)?
             .hidden(!hidden)
+            .parents(!no_ignore)
+            .ignore(!no_ignore)
+            .git_ignore(!no_ignore)
+            .git_global(!no_ignore)
+            .git_exclude(!no_ignore)
             .threads(min(12, num_cpus::get()))
             .build_parallel();
         let matcher = matcher.clone();
@@ -669,7 +685,7 @@ impl Fastmod {
         walk.run(move || {
             // We have to do our own changed file tracking, so don't
             // enable it in our Fastmod instance.
-            let mut fm = Fastmod::new(true, hidden, false);
+            let mut fm = Fastmod::new(true, hidden, no_ignore, false);
             let regex = regex.clone();
             let matcher = matcher.clone();
             let subst = subst.to_string();
@@ -817,6 +833,12 @@ compatibility with the original codemod.",
                 .help("Search hidden files.")
         )
         .arg(
+            Arg::with_name("no_ignore")
+                .short("u")
+                .long("no-ignore")
+                .help("Also search ignored files.")
+        )
+        .arg(
             Arg::with_name("iglob")
             .long("iglob")
             .value_name("IGLOB")
@@ -871,6 +893,7 @@ compatibility with the original codemod.",
     let file_set = get_file_set(&matches);
     let accept_all = matches.is_present("accept_all");
     let hidden = matches.is_present("hidden");
+    let no_ignore = matches.is_present("no_ignore");
     let print_changed_files = matches.is_present("print_changed_files");
     let regex_str = matches.value_of("match").expect("match is required!");
     let subst = matches.value_of("subst").expect("subst is required!");
@@ -906,10 +929,11 @@ not what you want. Press Enter to continue anyway or Ctrl-C to quit.",
             dirs,
             file_set,
             hidden,
+            no_ignore,
             print_changed_files,
         )
     } else {
-        Fastmod::new(accept_all, hidden, print_changed_files)
+        Fastmod::new(accept_all, hidden, no_ignore, print_changed_files)
             .run_interactive(&regex, &matcher, &subst, dirs, file_set)
     }
 }
@@ -1025,7 +1049,7 @@ mod tests {
 
     #[test]
     fn test_diff_with_unchanged_line_in_middle() {
-        let fm = Fastmod::new(false, false, false);
+        let fm = Fastmod::new(false, false, false, false);
         let diffs = fm.diffs_to_print("foo\nbar\nbaz", "bat\nbar\nqux");
         assert_eq!(
             diffs,
@@ -1041,7 +1065,7 @@ mod tests {
 
     #[test]
     fn test_diff_no_changes() {
-        let fm = Fastmod::new(false, false, false);
+        let fm = Fastmod::new(false, false, false, false);
         let diffs = fm.diffs_to_print("foo", "foo");
         assert_eq!(diffs, vec![]);
     }
@@ -1083,7 +1107,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", "foo")]);
         let file_path = dir.path().join("foo.txt");
         let regex = RegexBuilder::new("").multi_line(true).build().unwrap();
-        let mut fm = Fastmod::new(true, false, false);
+        let mut fm = Fastmod::new(true, false, false, false);
         fm.present_and_apply_patches(&regex, "x", &file_path, "foo".into())
             .unwrap();
         let contents = read_to_string(file_path).unwrap();
@@ -1095,7 +1119,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", "foofoo")]);
         let file_path = dir.path().join("foo.txt");
         let regex = RegexBuilder::new("foo").multi_line(true).build().unwrap();
-        let mut fm = Fastmod::new(true, false, false);
+        let mut fm = Fastmod::new(true, false, false, false);
         fm.present_and_apply_patches(&regex, "", &file_path, "foofoo".into())
             .unwrap();
         let contents = read_to_string(file_path).unwrap();
@@ -1107,7 +1131,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", "foo")]);
         let file_path = dir.path().join("foo.txt");
         let regex = RegexBuilder::new("foo").build().unwrap();
-        let mut fm = Fastmod::new(true, false, false);
+        let mut fm = Fastmod::new(true, false, false, false);
         fm.present_and_apply_patches(&regex, "foofoo", &file_path, "foo".into())
             .unwrap();
         let contents = read_to_string(file_path).unwrap();
@@ -1153,6 +1177,45 @@ mod tests {
                 assert_eq!(contents, "bar");
             } else {
                 assert_eq!(contents, "foo");
+            }
+        }
+    }
+
+    #[test]
+    fn test_no_ignore_files() {
+        for &no_ignore in &[false, true] {
+            let dir = create_test_files(&[
+                (".ignore", "ignored.txt"),
+                ("ignored.txt", "original text"),
+                ("not-ignored.txt", "original text"),
+            ]);
+            let mut args = vec![
+                "original",
+                "replacement",
+                "--dir",
+                dir.path().to_str().unwrap(),
+                "--accept-all",
+            ];
+            if no_ignore {
+                args.push("--no-ignore");
+            }
+
+            Command::cargo_bin("fastmod")
+                .unwrap()
+                .args(&args)
+                .assert()
+                .success();
+
+            let file_path_regular = dir.path().join("not-ignored.txt");
+            let contents_regular = read_to_string(file_path_regular).unwrap();
+            assert_eq!(contents_regular, "replacement text");
+
+            let file_path_ignored = dir.path().join("ignored.txt");
+            let contents_ignored = read_to_string(file_path_ignored).unwrap();
+            if no_ignore {
+                assert_eq!(contents_ignored, "replacement text");
+            } else {
+                assert_eq!(contents_ignored, "original text");
             }
         }
     }
