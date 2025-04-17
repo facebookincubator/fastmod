@@ -16,10 +16,10 @@
 
 use std::io;
 
-use crossterm::ExecutableCommand;
 use crossterm::style::SetForegroundColor;
 use crossterm::terminal::Clear;
 use crossterm::terminal::ClearType;
+use crossterm::ExecutableCommand;
 
 pub enum Color {
     Red,
