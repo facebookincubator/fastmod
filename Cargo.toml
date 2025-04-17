@@ -14,7 +14,7 @@ license = "Apache-2.0"
 [dependencies]
 anyhow = "1.0"
 clap = "2.31.2"
-crossterm = "0.24"
+crossterm = "0.29"
 diff = "0.1.11"
 grep = "0.3"
 ignore = "0.4.1"
