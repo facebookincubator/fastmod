@@ -826,6 +826,10 @@ compatibility with the original codemod.",
             .multiple(true)
             .conflicts_with("iglob")
             .help("A space-delimited list of globs to process.")
+            .long_help(
+                "A space-delimited list of globs to process. \
+                 Use '!' prefix to exclude directories or files (e.g., '!.git' to exclude .git directories."
+            )
         )
         .arg(
             Arg::with_name("hidden")
@@ -844,6 +848,10 @@ compatibility with the original codemod.",
             .value_name("IGLOB")
             .multiple(true)
             .help("A space-delimited list of case-insensitive globs to process.")
+            .long_help(
+                "A space-delimited list of case-insensitive globs to process. \
+                 Use '!' prefix to exclude directories or files (e.g., '!.git' to exclude .git directories."
+            )
         )
         .arg(
             Arg::with_name("accept_all")
