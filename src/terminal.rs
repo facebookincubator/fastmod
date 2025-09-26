@@ -14,13 +14,12 @@
  * limitations under the License.
  */
 
-use std::io;
-
-use crossterm::ExecutableCommand;
+use crossterm::style::Attribute;
+use crossterm::style::ResetColor;
+use crossterm::style::SetAttribute;
 use crossterm::style::SetForegroundColor;
-use crossterm::terminal::Clear;
-use crossterm::terminal::ClearType;
 
+#[derive(Copy, Clone)]
 pub enum Color {
     Red,
     Green,
@@ -36,21 +35,43 @@ impl Color {
 }
 
 pub fn clear() {
-    if io::stdout().execute(Clear(ClearType::All)).is_err() {
-        print!("{}", "\n".repeat(8));
+    #[cfg(not(test))]
+    {
+        use crossterm::execute;
+        use crossterm::terminal::{Clear, ClearType};
+        use std::io::stdout;
+
+        if execute!(stdout(), Clear(ClearType::All)).is_err() {
+            print!("{}", "\n".repeat(8));
+        }
+    }
+    #[cfg(test)]
+    {
+        // During tests, just print newlines
+        println!("{}", "\n".repeat(8));
     }
 }
 
 pub fn fg(color: Color) {
-    let _ = io::stdout().execute(SetForegroundColor(color.to_crossterm_color()));
+    print!("{}", SetForegroundColor(color.to_crossterm_color()));
 }
 
 pub fn reset() {
-    let _ = io::stdout().execute(SetForegroundColor(crossterm::style::Color::Reset));
+    print!("{}", ResetColor);
 }
 
 pub fn size() -> Option<(usize, usize)> {
     crossterm::terminal::size()
         .ok()
         .map(|(w, h)| (w as usize, h as usize))
+}
+
+pub fn print_colored_bold(val: &str, color: Color) {
+    print!(
+        "{}{}{}",
+        SetAttribute(Attribute::Bold),
+        val,
+        SetAttribute(Attribute::Reset),
+    );
+    fg(color);
 }
