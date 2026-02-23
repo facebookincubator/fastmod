@@ -21,10 +21,10 @@ ignore = "0.4.1"
 num_cpus = "1.8.0"
 regex = "1.5.5"
 rprompt = "1.0.3"
+tempfile = "3.8.0"
 
 [dev-dependencies]
 assert_cmd = "2"
-tempfile = "3.8.0"
 
 [profile.release]
 codegen-units = 1

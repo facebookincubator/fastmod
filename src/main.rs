@@ -22,15 +22,19 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::fs::read_to_string;
+use std::io::Write;
 use std::iter;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::process::Stdio;
 use std::process::exit;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::mpsc::channel;
 use std::thread;
+
+use tempfile::NamedTempFile;
 
 use anyhow::Context;
 use anyhow::Error;
@@ -261,6 +265,7 @@ struct Fastmod {
     hidden: bool,
     no_ignore: bool,
     changed_files: Option<Vec<PathBuf>>,
+    diff_tool: Option<String>,
 }
 
 impl Sink for FastmodSink {
@@ -297,7 +302,13 @@ fn backward_to_char_boundary(s: &str, mut index: usize) -> usize {
 }
 
 impl Fastmod {
-    fn new(accept_all: bool, hidden: bool, no_ignore: bool, print_changed_files: bool) -> Fastmod {
+    fn new(
+        accept_all: bool,
+        hidden: bool,
+        no_ignore: bool,
+        print_changed_files: bool,
+        diff_tool: Option<String>,
+    ) -> Fastmod {
         Fastmod {
             yes_to_all: accept_all,
             hidden,
@@ -307,6 +318,7 @@ impl Fastmod {
             } else {
                 None
             },
+            diff_tool,
         }
     }
 
@@ -439,7 +451,12 @@ impl Fastmod {
         } else {
             println!("{}:{}-{}", path.to_string_lossy(), start_line, end_line);
         }
-        self.print_diff(&diffs);
+
+        if let Some(ref diff_tool) = self.diff_tool {
+            self.run_external_diff(old, new, diff_tool)?;
+        } else {
+            self.print_diff(&diffs);
+        }
         let mut user_input = if self.yes_to_all {
             'y'
         } else {
@@ -539,6 +556,40 @@ impl Fastmod {
                 }
             }
         }
+    }
+
+    fn run_external_diff(&self, old: &str, new: &str, diff_tool: &str) -> Result<()> {
+        let mut old_file = NamedTempFile::with_prefix("fastmod-old-")
+            .context("Unable to create temporary file for old content")?;
+        let mut new_file = NamedTempFile::with_prefix("fastmod-new-")
+            .context("Unable to create temporary file for new content")?;
+
+        old_file
+            .write_all(old.as_bytes())
+            .context("Unable to write old content to temporary file")?;
+        new_file
+            .write_all(new.as_bytes())
+            .context("Unable to write new content to temporary file")?;
+
+        old_file.flush().context("Unable to flush old temp file")?;
+        new_file.flush().context("Unable to flush new temp file")?;
+
+        let args: Vec<&str> = diff_tool.split_whitespace().collect();
+        if args.is_empty() {
+            anyhow::bail!("Empty diff tool command");
+        }
+
+        Command::new(args[0])
+            .args(&args[1..])
+            .arg(old_file.path())
+            .arg(new_file.path())
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .with_context(|| format!("Unable to run diff tool: {}", diff_tool))?;
+
+        Ok(())
     }
 
     fn run_interactive(
@@ -685,7 +736,7 @@ impl Fastmod {
         walk.run(move || {
             // We have to do our own changed file tracking, so don't
             // enable it in our Fastmod instance.
-            let mut fm = Fastmod::new(true, hidden, no_ignore, false);
+            let mut fm = Fastmod::new(true, hidden, no_ignore, false, None);
             let regex = regex.clone();
             let matcher = matcher.clone();
             let subst = subst.to_string();
@@ -862,6 +913,20 @@ compatibility with the original codemod.",
                 .help("Treat REGEX as a literal string. Avoids the need to escape regex metacharacters (compare to ripgrep's option of the same name).")
         )
         .arg(
+            Arg::with_name("diff_tool")
+                .long("diff-tool")
+                .value_name("COMMAND")
+                .help("Use an external diff tool (e.g., difftastic, delta, colordiff).")
+                .long_help(
+                    "Use an external diff tool for displaying diffs instead of the built-in \
+diff. The tool will be invoked with two temporary file paths \
+as arguments (old content, new content). Examples:
+  --diff-tool difft
+  --diff-tool delta
+  --diff-tool 'difft --color always'"
+                )
+        )
+        .arg(
             Arg::with_name("match")
                 .value_name("REGEX")
                 .help("Regular expression to match.")
@@ -895,6 +960,7 @@ compatibility with the original codemod.",
     let hidden = matches.is_present("hidden");
     let no_ignore = matches.is_present("no_ignore");
     let print_changed_files = matches.is_present("print_changed_files");
+    let diff_tool = matches.value_of("diff_tool").map(String::from);
     let regex_str = matches.value_of("match").expect("match is required!");
     let subst = matches.value_of("subst").expect("subst is required!");
     let (maybe_escaped_regex, subst) = if matches.is_present("fixed_strings") {
@@ -933,8 +999,14 @@ not what you want. Press Enter to continue anyway or Ctrl-C to quit.",
             print_changed_files,
         )
     } else {
-        Fastmod::new(accept_all, hidden, no_ignore, print_changed_files)
-            .run_interactive(&regex, &matcher, &subst, dirs, file_set)
+        Fastmod::new(
+            accept_all,
+            hidden,
+            no_ignore,
+            print_changed_files,
+            diff_tool,
+        )
+        .run_interactive(&regex, &matcher, &subst, dirs, file_set)
     }
 }
 
@@ -1049,7 +1121,7 @@ mod tests {
 
     #[test]
     fn test_diff_with_unchanged_line_in_middle() {
-        let fm = Fastmod::new(false, false, false, false);
+        let fm = Fastmod::new(false, false, false, false, None);
         let diffs = fm.diffs_to_print("foo\nbar\nbaz", "bat\nbar\nqux");
         assert_eq!(
             diffs,
@@ -1065,7 +1137,7 @@ mod tests {
 
     #[test]
     fn test_diff_no_changes() {
-        let fm = Fastmod::new(false, false, false, false);
+        let fm = Fastmod::new(false, false, false, false, None);
         let diffs = fm.diffs_to_print("foo", "foo");
         assert_eq!(diffs, vec![]);
     }
@@ -1107,7 +1179,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", "foo")]);
         let file_path = dir.path().join("foo.txt");
         let regex = RegexBuilder::new("").multi_line(true).build().unwrap();
-        let mut fm = Fastmod::new(true, false, false, false);
+        let mut fm = Fastmod::new(true, false, false, false, None);
         fm.present_and_apply_patches(&regex, "x", &file_path, "foo".into())
             .unwrap();
         let contents = read_to_string(file_path).unwrap();
@@ -1119,7 +1191,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", "foofoo")]);
         let file_path = dir.path().join("foo.txt");
         let regex = RegexBuilder::new("foo").multi_line(true).build().unwrap();
-        let mut fm = Fastmod::new(true, false, false, false);
+        let mut fm = Fastmod::new(true, false, false, false, None);
         fm.present_and_apply_patches(&regex, "", &file_path, "foofoo".into())
             .unwrap();
         let contents = read_to_string(file_path).unwrap();
@@ -1131,7 +1203,7 @@ mod tests {
         let dir = create_test_files(&[("foo.txt", "foo")]);
         let file_path = dir.path().join("foo.txt");
         let regex = RegexBuilder::new("foo").build().unwrap();
-        let mut fm = Fastmod::new(true, false, false, false);
+        let mut fm = Fastmod::new(true, false, false, false, None);
         fm.present_and_apply_patches(&regex, "foofoo", &file_path, "foo".into())
             .unwrap();
         let contents = read_to_string(file_path).unwrap();
