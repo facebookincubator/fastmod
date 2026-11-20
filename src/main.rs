@@ -22,6 +22,7 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::fs::read_to_string;
+use std::io;
 use std::io::Write;
 use std::iter;
 use std::path::Path;
@@ -55,8 +56,7 @@ use tempfile::NamedTempFile;
 
 mod terminal;
 
-use rprompt::prompt_reply_stderr;
-use rprompt::prompt_reply_stdout;
+use rprompt::prompt_reply_from_bufread;
 
 use crate::terminal::Color;
 
@@ -247,7 +247,9 @@ fn looks_like_code(path: &Path) -> bool {
 
 fn prompt(prompt_text: &str, letters: &str, default: Option<char>) -> Result<char> {
     loop {
-        let input = prompt_reply_stdout(prompt_text).context("Unable to read user input")?;
+        let input =
+            prompt_reply_from_bufread(&mut io::stdin().lock(), &mut io::stdout(), prompt_text)
+                .context("Unable to read user input")?;
         if input.is_empty()
             && let Some(default) = default
         {
@@ -967,11 +969,15 @@ fn fastmod() -> Result<()> {
         .build()
         .with_context(|| format!("Unable to make regex from {}", regex_str))?;
     if regex.is_match("") {
-        let _ = prompt_reply_stderr(&format!(
-            "Warning: your regex {:?} matches the empty string. This is probably
+        let _ = prompt_reply_from_bufread(
+            &mut io::stdin().lock(),
+            &mut io::stderr(),
+            format!(
+                "Warning: your regex {:?} matches the empty string. This is probably
 not what you want. Press Enter to continue anyway or Ctrl-C to quit.",
-            regex,
-        ))?;
+                regex,
+            ),
+        )?;
     }
     let matcher = RegexMatcherBuilder::new()
         .case_insensitive(ignore_case)
